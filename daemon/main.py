@@ -36,7 +36,7 @@ def _auth(authorization: str | None):
         raise HTTPException(401, "Invalid bridge token")
 
 READ_ONLY = {"scan_wifi", "adapter_power_status", "list_ports", "system_overview", "vpn_status", "audit_recent"}
-MUTATING = {"disable_adapter_sleep", "kill_process", "network_recovery", "vpn_connect", "vpn_disconnect", "vpn_kill_switch", "vpn_init_mesh", "vpn_apply_config"}
+MUTATING = {"disable_adapter_sleep", "wifi_saved_passwords", "kill_process", "network_recovery", "vpn_connect", "vpn_disconnect", "vpn_kill_switch", "vpn_init_mesh", "vpn_apply_config"}
 
 @app.get("/status")
 def status(authorization: str | None = Header(None)):
@@ -60,6 +60,7 @@ async def execute(req: Request, authorization: str | None = Header(None)):
                 "message": f"'{tool}' is mutating and needs human approval. Re-send with approved=true."}
     try:
         if tool == "scan_wifi": result = wifi_scanner.scan_wifi()
+        elif tool == "wifi_saved_passwords": result = wifi_scanner.saved_passwords()
         elif tool == "adapter_power_status": result = wifi_scanner.adapter_power_status()
         elif tool == "disable_adapter_sleep": result = wifi_scanner.disable_adapter_sleep()
         elif tool == "list_ports": result = network_tools.list_ports()

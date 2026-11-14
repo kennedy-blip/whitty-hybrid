@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const { tool, args, approved } = await req.json();
-  const res = await bridgeExecute(tool, { ...(args || {}), approved }, bridgeUrlFromRequest(req));
+  const res = await bridgeExecute(tool, args || {}, bridgeUrlFromRequest(req), approved === true);
   logAudit({ tool, args: args || {}, result: res.data, approved: approved ?? null, source: "bridge" });
   return NextResponse.json(res.data);
 }

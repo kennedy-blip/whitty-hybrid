@@ -68,10 +68,15 @@ No tunnel? Use `http://<your-PC-LAN-IP>:8765` — same Wi-Fi only.
 |---|---|
 | DNS / SSL / CORS / API health | **Tools → Cloud Sentinel** (runs on Vercel) |
 | Wi-Fi scan, adapter power, ports, system | **Tools → Local Bridge** |
+| Saved Wi-Fi passwords | **Tools → Saved Wi-Fi Passwords** → Approve (or ask the AI: *"show my saved Wi-Fi passwords"*) |
 | One-click VPN | **🔐 Connect VPN on My PC** → **Approve** the card |
 | Everything that ran | **Audit Trail** (SQLite at `daemon/audit.db`) |
 
 VPN needs an elevated shell (Administrator on Windows, `sudo` on macOS/Linux) because it creates a network tunnel.
+
+**Approvals:** anything that changes your PC returns `requiresApproval` from the daemon and renders an **Approve & Run / Reject** card. The daemon refuses to execute it until your approval arrives — buttons work in both the Tools panel and the AI chat.
+
+**Wi-Fi passwords:** Windows needs the daemon running **as Administrator** for `netsh wlan show profile … key=clear`; macOS may ask for Keychain access; Linux needs `sudo` to read `/etc/NetworkManager/system-connections`.
 
 ---
 

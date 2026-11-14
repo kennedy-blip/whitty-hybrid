@@ -48,13 +48,15 @@ The daemon needs **Python 3.9+**; **3.12 or 3.13 is recommended**. Dependencies 
 
 ## Features
 - **Cloud Sentinel:** DNS trace, SSL audit, CORS/header analysis, API latency triage.
-- **Local Bridge:** full Wi-Fi decrypt (SSID/BSSID/RSSI/channel/congestion), adapter power-state + fix, port→PID mapping, DNS/DHCP/Winsock recovery.
-- **Safety:** read-only auto-approved; mutating actions show Approve/Reject cards; every action logged to SQLite (`daemon/audit.db`).
+- **Local Bridge:** full Wi-Fi scan (SSID/BSSID/RSSI/channel/congestion), **saved Wi-Fi passwords** (`netsh … key=clear` / macOS Keychain / NetworkManager), adapter power-state + fix, port→PID mapping, DNS/DHCP/Winsock recovery.
+- **Safety:** read-only auto-approved; mutating actions (VPN, network reset, kill process, revealing Wi-Fi passwords) show Approve/Reject cards — the daemon refuses them until `approved: true`; every action logged to SQLite (`daemon/audit.db`).
 - **VPN:** one-click WireGuard — daemon auto-installs `wireguard-tools`, brings the tunnel up on your PC, verifies public IP. Generate phone/laptop configs + QR codes. Optional VPS exit-node via `scripts/deploy-vps.sh`.
 
 ## Env vars
 | Var | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | AI agent (demo mode if unset) |
+| `GROQ_API_KEY` | **Preferred** — Groq (OpenAI-compatible) powers the agent |
+| `GROQ_MODEL` | Groq model, default `llama-3.3-70b-versatile` |
+| `OPENAI_API_KEY` | Fallback provider if no Groq key (demo mode if neither set) |
 | `BRIDGE_URL` | Daemon URL (localhost or Cloudflare Tunnel) |
 | `BRIDGE_TOKEN` | Shared secret for the bridge |
