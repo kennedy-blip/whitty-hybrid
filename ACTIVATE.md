@@ -96,6 +96,8 @@ VPN needs an elevated shell (Administrator on Windows, `sudo` on macOS/Linux) be
 | `Building wheel for pydantic-core ... error: interpreter version (3.14) is newer than PyO3's maximum supported version (3.13)` | Fixed in the repo — `git pull` and rerun. Cause: old hard pins had no 3.14 wheel so pip compiled from Rust. If it still happens, use Python 3.12/3.13: `py -3.12 -m venv .venv` then `.\daemon\.venv\Scripts\python.exe -m pip install -r daemon\requirements.txt` |
 | Any "failed building wheel" / maturin / cargo error | Your Python is newer than the published wheels. Install 3.12 or 3.13 and/or set `$env:WHITTY_PYTHON="C:\Python312\python.exe"` |
 | `.venv` created by a different Python | The launcher now detects this and rebuilds it automatically |
+| `Remove-Item … .venv\Lib\site-packages\psutil\_psutil_windows.pyd: Access to the path is denied` | A daemon is still running and holding the `.dll`/`.pyd` files. Stop it first: `Get-Process python,pythonw -EA SilentlyContinue | Stop-Process -Force` — or simply skip deleting `.venv`; the launcher repairs it in place |
+| `a daemon is already answering on :8765` | Expected when one is already running; the launcher leaves it alone instead of starting a duplicate |
 | VPN: "WireGuard not installed" | The daemon auto-installs it; if that fails install from wireguard.com and retry |
 | VPN connect hangs / no public IP | Restart the shell as Administrator / `sudo` |
 

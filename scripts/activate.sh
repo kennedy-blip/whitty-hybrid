@@ -53,7 +53,11 @@ if [ -z "${BRIDGE_TOKEN:-}" ] && [ -f daemon/.env ]; then
   BRIDGE_TOKEN=$(grep -Eo '^\s*BRIDGE_TOKEN\s*=\s*.*' daemon/.env | head -n1 | cut -d= -f2- | tr -d '"'"'"' \r' || true)
 fi
 if [ -z "${BRIDGE_TOKEN:-}" ]; then
-  read -r -p "  Paste your BRIDGE_TOKEN (Vercel → Settings → Environment Variables): " BRIDGE_TOKEN
+  if [ -t 0 ]; then
+    read -r -p "  Paste your BRIDGE_TOKEN (Vercel → Settings → Environment Variables): " BRIDGE_TOKEN || true
+  else
+    echo "  ! No BRIDGE_TOKEN and no terminal to prompt on — starting tokenless (the app will get 401s)."
+  fi
 fi
 export BRIDGE_TOKEN
 
@@ -84,16 +88,22 @@ fi
 echo "  dependencies OK"
 
 # ---------- daemon ----------
-echo "  starting daemon on :8765 ..."
-python main.py &
-DAEMON_PID=$!
-sleep 3
-if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-  echo "  ✗ daemon exited immediately — run 'python main.py' in daemon/ to see why" >&2
-  exit 1
-fi
-if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 5 http://localhost:8765/health >/dev/null; then
-  echo "  daemon is healthy"
+DAEMON_PID=""
+if curl -fsS --max-time 3 http://localhost:8765/health >/dev/null 2>&1; then
+  echo "  a daemon is already answering on :8765 — leaving it alone"
+  echo "    (stop it first if you want this script to manage it)"
+else
+  echo "  starting daemon on :8765 ..."
+  python main.py &
+  DAEMON_PID=$!
+  sleep 3
+  if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    echo "  ✗ daemon exited immediately — port already in use, or run 'python main.py' in daemon/ to see why" >&2
+    exit 1
+  fi
+  if curl -fsS --max-time 5 http://localhost:8765/health >/dev/null 2>&1; then
+    echo "  daemon is healthy"
+  fi
 fi
 
 # ---------- tunnel ----------
@@ -104,8 +114,12 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   echo "    b) same Wi-Fi only: use  http://<this-Mac-or-Linux-LAN-IP>:8765  in the web app"
   echo ""
   echo "  Daemon running. Ctrl+C to stop."
-  trap 'kill $DAEMON_PID 2>/dev/null || true' EXIT INT TERM
-  wait $DAEMON_PID
+  if [ -n "${DAEMON_PID:-}" ]; then
+    trap 'kill $DAEMON_PID 2>/dev/null || true' EXIT INT TERM
+    wait $DAEMON_PID
+  else
+    while true; do sleep 3600; done
+  fi
   exit 0
 fi
 
@@ -113,7 +127,7 @@ echo "  opening public tunnel ..."
 LOG=$(mktemp -t whitty-tunnel)
 cloudflared tunnel --url http://localhost:8765 2>"$LOG" &
 TUNNEL_PID=$!
-trap 'kill $DAEMON_PID $TUNNEL_PID 2>/dev/null || true' EXIT INT TERM
+trap 'kill ${DAEMON_PID:-} $TUNNEL_PID 2>/dev/null || true' EXIT INT TERM
 
 URL=""
 for _ in $(seq 1 30); do
@@ -134,4 +148,4 @@ else
 fi
 echo ""
 echo "  Running. Ctrl+C to stop daemon + tunnel."
-wait $DAEMON_PID
+if [ -n "${DAEMON_PID:-}" ]; then wait $DAEMON_PID; else while true; do sleep 3600; done; fi
