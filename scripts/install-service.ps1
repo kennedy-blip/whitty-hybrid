@@ -5,33 +5,48 @@
 #
 # Registers a Scheduled Task that launches pythonw.exe (no console window).
 # The token is read from daemon\.env, so create that file first:
-#   BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec
+#   "BRIDGE_TOKEN=..." | Set-Content .\daemon\.env -Encoding ascii
 #
 # NOTE: this file is deliberately pure ASCII. Windows PowerShell 5.1 reads
 # BOM-less scripts in the system ANSI codepage, so non-ASCII characters (em
 # dashes, checkmarks) get mangled and can break the parser.
-param([switch]$StartNow)
+param(
+  [switch]$StartNow,
+  [ValidateSet("auto", "highest", "limited")]
+  [string]$RunLevel = "auto",
+  # Re-launch this script in an elevated window (UAC prompt) and exit.
+  [switch]$Elevate
+)
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $daemonDir = Join-Path $root "daemon"
-$venvPy = Join-Path $daemonDir ".venv\Scripts\pythonw.exe"
 $taskName = "WhittyHybridDaemon"
+
+function Test-Elevated {
+  try {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $pr = New-Object Security.Principal.WindowsPrincipal($id)
+    return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  } catch { return $false }
+}
+
+if ($Elevate -and -not (Test-Elevated)) {
+  Write-Host "  asking Windows for administrator rights (approve the UAC prompt) ..." -ForegroundColor Yellow
+  $cmd = "& '$PSCommandPath' -StartNow"
+  Start-Process powershell -Verb RunAs -ArgumentList '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', $cmd
+  Write-Host "  An elevated window is opening - read its output there." -ForegroundColor Green
+  exit 0
+}
 
 if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
   Write-Host "  X Scheduled Tasks cmdlets unavailable (needs Windows 8 / Server 2012+)." -ForegroundColor Red
   exit 1
 }
 
-$existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($existing) {
-  Write-Host "  replacing existing task '$taskName'" -ForegroundColor DarkGray
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-}
-
+$venvPy = Join-Path $daemonDir ".venv\Scripts\pythonw.exe"
 if (-not (Test-Path -LiteralPath $venvPy)) {
-  $venvPy = Join-Path $root "daemon\.venv2\Scripts\pythonw.exe"
+  $venvPy = Join-Path $daemonDir ".venv2\Scripts\pythonw.exe"
 }
 if (-not (Test-Path -LiteralPath $venvPy)) {
   Write-Host "  X pythonw.exe not found under daemon\.venv or daemon\.venv2" -ForegroundColor Red
@@ -42,14 +57,36 @@ Write-Host "  using: $venvPy" -ForegroundColor DarkGray
 
 $envFile = Join-Path $daemonDir ".env"
 if (-not (Test-Path -LiteralPath $envFile)) {
-  Write-Host "  ! daemon\.env not found - the daemon would start without a token." -ForegroundColor Yellow
-  Write-Host "    Create it with one line:  BRIDGE_TOKEN=<your token>" -ForegroundColor Yellow
+  Write-Host "  ! daemon\.env not found - the daemon will REFUSE to start without a token." -ForegroundColor Yellow
+  Write-Host "    Create it:  `"BRIDGE_TOKEN=<your token>`" | Set-Content .\daemon\.env -Encoding ascii" -ForegroundColor Yellow
+}
+
+$elevated = Test-Elevated
+$wanted = $RunLevel
+if ($wanted -eq "auto") { $wanted = if ($elevated) { "highest" } else { "limited" } }
+if ($wanted -eq "highest" -and -not $elevated) {
+  Write-Host "  ! Highest privileges need an elevated PowerShell - falling back to normal." -ForegroundColor Yellow
+  $wanted = "limited"
+}
+$level = if ($wanted -eq "highest") { "Highest" } else { "Limited" }
+
+# Replacing a task that belongs to another user (or was created elevated) also
+# needs admin; do not let a failure there abort the install.
+$existing = $null
+try { $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop } catch { $existing = $null }
+if ($existing) {
+  Write-Host "  replacing existing task '$taskName'" -ForegroundColor DarkGray
+  try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch { }
+  try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop } catch {
+    Write-Host "  X could not remove the old task (created with admin rights?)." -ForegroundColor Red
+    Write-Host "    Run this again from an elevated PowerShell, or delete it in Task Scheduler." -ForegroundColor Yellow
+    exit 1
+  }
 }
 
 $action = New-ScheduledTaskAction -Execute $venvPy -Argument "main.py" -WorkingDirectory $daemonDir
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-# Highest privileges so WireGuard + "netsh wlan ... key=clear" work without prompts.
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel $level
 $settingsArgs = @{
   AllowStartIfOnBatteries    = $true
   DontStopIfGoingOnBatteries = $true
@@ -60,24 +97,62 @@ $settingsArgs = @{
 }
 $settings = New-ScheduledTaskSettingsSet @settingsArgs
 
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Whitty Hybrid local diagnostics + VPN daemon (http://localhost:8765)" -Force | Out-Null
-Write-Host "  OK installed scheduled task '$taskName'" -ForegroundColor Green
+$registered = $false
+try {
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Whitty Hybrid local diagnostics + VPN daemon (http://localhost:8765)" -Force -ErrorAction Stop | Out-Null
+  $registered = $true
+} catch {
+  $msg = $_.Exception.Message
+  Write-Host "  X Register-ScheduledTask failed: $msg" -ForegroundColor Red
+  if ($msg -match "Access is denied|0x80070005") {
+    if (-not $elevated) {
+      Write-Host "    -> Rerun with one command; it prompts for admin itself:" -ForegroundColor Yellow
+      Write-Host "         .\scripts\install-service.ps1 -StartNow -Elevate" -ForegroundColor White
+      Write-Host "    Password/VPN tools need admin anyway, so this is worth doing." -ForegroundColor DarkGray
+    } else {
+      Write-Host "    -> Even elevated, Task Scheduler said no. Check for a group policy that blocks task creation." -ForegroundColor Yellow
+    }
+  }
+}
+
+if (-not $registered) {
+  Write-Host ""
+  Write-Host "  Nothing was installed. The daemon is NOT running in the background." -ForegroundColor Red
+  Write-Host "  Quick alternative while you sort that out - start it in this window:" -ForegroundColor Yellow
+  Write-Host "     cd $daemonDir" -ForegroundColor White
+  Write-Host "     .\.venv\Scripts\python.exe main.py" -ForegroundColor White
+  exit 1
+}
+
+Write-Host "  OK registered task '$taskName' (run level: $level)" -ForegroundColor Green
+if ($level -eq "limited") {
+  Write-Host "  note: without elevation, revealing saved Wi-Fi passwords and WireGuard setup" -ForegroundColor DarkGray
+  Write-Host "        will fail. Rerun from an elevated PowerShell to unlock those." -ForegroundColor DarkGray
+}
 
 if ($StartNow) {
-  Start-ScheduledTask -TaskName $taskName
-  Start-Sleep -Seconds 4
-  $ok = $false
   try {
-    $p = Invoke-WebRequest -Uri "http://localhost:8765/health" -UseBasicParsing -TimeoutSec 6
-    Write-Host "  daemon healthy (HTTP $($p.StatusCode))" -ForegroundColor Green
-    $ok = $true
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
   } catch {
-    Write-Host "  ! no answer on http://localhost:8765/health yet." -ForegroundColor Yellow
-    Write-Host "    Task Scheduler > $taskName > Last Run Result will say why" -ForegroundColor Yellow
-    Write-Host "    (0x0 = running fine, 0x1 = python crashed, check daemon\.env)" -ForegroundColor DarkGray
+    Write-Host "  ! could not start the task: $($_.Exception.Message)" -ForegroundColor Yellow
+    exit 1
   }
-  if ($ok) {
-    Write-Host "  The daemon keeps running after you close this window." -ForegroundColor DarkGray
+  $healthy = $false
+  for ($i = 0; $i -lt 10; $i++) {
+    Start-Sleep -Seconds 2
+    try {
+      $r = Invoke-WebRequest -Uri "http://localhost:8765/health" -UseBasicParsing -TimeoutSec 4
+      Write-Host "  daemon healthy (HTTP $($r.StatusCode)) - runs without a terminal from now on" -ForegroundColor Green
+      $healthy = $true
+      break
+    } catch { }
+  }
+  if (-not $healthy) {
+    Write-Host "  ! no answer on http://localhost:8765/health after 20s." -ForegroundColor Yellow
+    Write-Host "    Task Scheduler > $taskName > Last Run Result:" -ForegroundColor Yellow
+    Write-Host "      0x0   = still starting / already running" -ForegroundColor DarkGray
+    Write-Host "      0x1   = python crashed - run daemon\main.py in a terminal to see why" -ForegroundColor DarkGray
+    Write-Host "    Commonest cause: daemon\.env missing or no BRIDGE_TOKEN in it." -ForegroundColor Yellow
   }
 } else {
   Write-Host "  It starts automatically the next time you log in." -ForegroundColor DarkGray
@@ -88,6 +163,3 @@ Write-Host "  Manage it:" -ForegroundColor DarkGray
 Write-Host "    Start-ScheduledTask -TaskName $taskName" -ForegroundColor DarkGray
 Write-Host "    Stop-ScheduledTask  -TaskName $taskName" -ForegroundColor DarkGray
 Write-Host "    Unregister-ScheduledTask -TaskName $taskName -Confirm:`$false" -ForegroundColor DarkGray
-Write-Host ""
-Write-Host "  Tunnel: use .\scripts\install-tunnel.ps1 -Mode tailscale for a stable" -ForegroundColor DarkGray
-Write-Host "  https://<pc>.<tailnet>.ts.net URL that also survives reboots." -ForegroundColor DarkGray

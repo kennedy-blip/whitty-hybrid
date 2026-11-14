@@ -121,6 +121,16 @@ bash scripts/install-service.sh
 journalctl --user -u whitty-daemon -f
 ```
 
+### Task Scheduler needs admin (for the full tool set)
+
+`Highest` privileges can only be registered from an **elevated** PowerShell - and they are what lets the daemon read Wi-Fi keys (`netsh ... key=clear`) and drive WireGuard. One command handles it:
+
+```powershell
+.\scripts\install-service.ps1 -StartNow -Elevate
+```
+
+Approve the UAC prompt; the elevated window installs the task and starts the daemon. Without elevation the script falls back to a normal-privilege task: the daemon still runs in the background, but password reveal and VPN actions will fail.
+
 ### The token is mandatory now
 
 `daemon\main.py` reads `daemon\.env` itself and **refuses to start without `BRIDGE_TOKEN`** (it can reveal Wi-Fi passwords — an open daemon behind a public tunnel would be a real problem). One line is enough:
