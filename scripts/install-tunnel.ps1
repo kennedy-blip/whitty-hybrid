@@ -19,12 +19,42 @@ $taskName = "WhittyHybridTunnel"
 
 function Have([string]$exe) { return [bool](Get-Command $exe -ErrorAction SilentlyContinue) }
 
+# Winget-installed tools aren't on PATH in the session that installed them, so
+# resolve the exe from its known install locations instead of making you reopen
+# the terminal.
+function Resolve-Tool([string]$name, [string[]]$fallbacks) {
+  $cmd = Get-Command $name -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  foreach ($p in $fallbacks) {
+    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+  }
+  return $null
+}
+
+function Add-ToolPaths {
+  foreach ($dir in @("$env:ProgramFiles\Tailscale", "$env:ProgramFiles\cloudflared", "$env:LOCALAPPDATA\Microsoft\WinGet\Links")) {
+    if ((Test-Path -LiteralPath $dir) -and ($env:PATH -notlike "*$dir*")) { $env:PATH = "$env:PATH;$dir" }
+  }
+}
+
+$tailscalePaths = @(
+  "$env:ProgramFiles\Tailscale\tailscale.exe",
+  "$env:LOCALAPPDATA\Microsoft\WinGet\Links\tailscale.exe"
+)
+$cloudflaredPaths = @(
+  "$env:ProgramFiles\cloudflared\cloudflared.exe",
+  "$env:LOCALAPPDATA\Microsoft\WinGet\Links\cloudflared.exe"
+)
+
+
 if ($Uninstall) {
   if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
     $t = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($t) { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
   }
-  if (Have "tailscale") { & tailscale funnel reset 2>$null | Out-Null }
+  Add-ToolPaths
+  $tsReset = Resolve-Tool "tailscale" $tailscalePaths
+  if ($tsReset) { & $tsReset funnel reset 2>$null | Out-Null }
   Write-Host "  Tunnel task removed. (Cloudflare tunnel definition kept - delete with: cloudflared tunnel delete witty)" -ForegroundColor Green
   exit 0
 }
@@ -55,16 +85,25 @@ if ($Mode -eq "tailscale") {
   }
 
   Write-Host "  bringing tailscale up (a browser window may open for login) ..." -ForegroundColor Yellow
-  & tailscale up
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "  ! 'tailscale up' returned $LASTEXITCODE - finish the login, then rerun." -ForegroundColor Yellow
+  $upOk = $false
+  for ($try = 1; $try -le 4; $try++) {
+    & $tsExe up
+    if ($LASTEXITCODE -eq 0) { $upOk = $true; break }
+    Write-Host "  (tailscaled may still be starting - retrying in 5s)" -ForegroundColor DarkGray
+    Start-Sleep -Seconds 5
+  }
+  if (-not $upOk) {
+    Write-Host "  ! 'tailscale up' kept failing. Check the Tailscale service:" -ForegroundColor Yellow
+    Write-Host "      Get-Service Tailscale" -ForegroundColor White
+    Write-Host "      Start-Service Tailscale" -ForegroundColor White
+    Write-Host "    then rerun this script." -ForegroundColor Yellow
     exit 1
   }
 
   Write-Host "  enabling Funnel (public HTTPS on your tailnet, no domain needed) ..." -ForegroundColor Yellow
-  & tailscale funnel --bg $Port
+  & $tsExe funnel --bg $Port
   Start-Sleep -Seconds 3
-  $status = (& tailscale funnel status 2>$null | Out-String)
+  $status = (& $tsExe funnel status 2>$null | Out-String)
   Write-Host ""
   Write-Host $status
 
@@ -86,16 +125,23 @@ if ($Mode -eq "tailscale") {
 }
 
 # ============================================================ CLOUDFLARE
-if (-not (Have "cloudflared")) {
+Add-ToolPaths
+$cfExe = Resolve-Tool "cloudflared" $cloudflaredPaths
+if (-not $cfExe) {
   Write-Host "  cloudflared not found." -ForegroundColor Yellow
   if (Have "winget") {
     Write-Host "  Installing: winget install --id Cloudflare.cloudflared -e" -ForegroundColor Yellow
     winget install --id Cloudflare.cloudflared -e --accept-source-agreements --accept-package-agreements
-    Write-Host "  CLOSE and REOPEN this terminal, then rerun this script." -ForegroundColor Yellow
+    Add-ToolPaths
+    $cfExe = Resolve-Tool "cloudflared" $cloudflaredPaths
+    if ($cfExe) { Write-Host "  installed -> $cfExe (continuing)" -ForegroundColor Green }
   } else {
     Write-Host "  Download cloudflared-windows-amd64.exe from Cloudflare's releases page and put it on PATH." -ForegroundColor Yellow
   }
-  exit 1
+  if (-not $cfExe) {
+    Write-Host "  Still not found. Close and reopen PowerShell, then rerun this script." -ForegroundColor Yellow
+    exit 1
+  }
 }
 
 $cfDir = Join-Path $env:USERPROFILE ".cloudflared"
@@ -105,7 +151,7 @@ $tunnelName = "whitty"
 
 if (-not (Test-Path -LiteralPath $cert)) {
   Write-Host "  First-time login: a browser window opens. Pick the domain you want to use." -ForegroundColor Yellow
-  & cloudflared tunnel login
+  & $cfExe tunnel login
   if (-not (Test-Path -LiteralPath $cert)) {
     Write-Host "  X Login did not complete (no cert.pem). Rerun when you can finish the browser step." -ForegroundColor Red
     Write-Host "    A Cloudflare account with a domain is required for named tunnels." -ForegroundColor Yellow
@@ -115,14 +161,14 @@ if (-not (Test-Path -LiteralPath $cert)) {
 }
 
 # create (or reuse) the tunnel
-$list = (& cloudflared tunnel list 2>$null | Out-String)
+$list = (& $cfExe tunnel list 2>$null | Out-String)
 $tunnelId = ""
 if ($list -match "(?m)^\S+\s+$tunnelName\s") {
   $tunnelId = ([regex]::Match($list, "(?m)^(\S+)\s+$tunnelName\s")).Groups[1].Value
   Write-Host "  reusing existing tunnel '$tunnelName' ($tunnelId)" -ForegroundColor DarkGray
 } else {
-  & cloudflared tunnel create $tunnelName
-  $list = (& cloudflared tunnel list 2>$null | Out-String)
+  & $cfExe tunnel create $tunnelName
+  $list = (& $cfExe tunnel list 2>$null | Out-String)
   $tunnelId = ([regex]::Match($list, "(?m)^(\S+)\s+$tunnelName\s")).Groups[1].Value
 }
 if (-not $tunnelId) {
@@ -146,7 +192,7 @@ if (-not $Hostname) {
 }
 
 Write-Host "  routing $Hostname -> tunnel '$tunnelName' ..." -ForegroundColor Yellow
-& cloudflared tunnel route dns $tunnelName $Hostname
+& $cfExe tunnel route dns $tunnelName $Hostname
 
 $yaml = @"
 tunnel: $tunnelId
@@ -164,7 +210,7 @@ Write-Host "  wrote $config" -ForegroundColor DarkGray
 if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
   $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if ($existing) { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
-  $cfExe = (Get-Command cloudflared).Source
+  # $cfExe already resolved above
   $action = New-ScheduledTaskAction -Execute $cfExe -Argument "tunnel --config `"$config`" run $tunnelName"
   $trigger = New-ScheduledTaskTrigger -AtLogOn
   $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
