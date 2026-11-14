@@ -43,6 +43,9 @@ python main.py
 ```
 Then paste the tunnel URL into the app's **🔗 Connect my PC** card (or set `BRIDGE_URL` on Vercel).
 
+### Security defaults
+The daemon loads `daemon/.env` and **will not start without `BRIDGE_TOKEN`**. It binds `127.0.0.1` (tunnels proxy to localhost); set `BRIDGE_HOST=0.0.0.0` to opt into LAN exposure. Every request is compared with `hmac.compare_digest`, so an empty token never matches.
+
 ### Keep it running
 `scripts/install-service.ps1` (Windows Scheduled Task) or `scripts/install-service.sh` (systemd user unit) runs the daemon in the background at logon — no terminal required.
 

@@ -121,6 +121,16 @@ bash scripts/install-service.sh
 journalctl --user -u whitty-daemon -f
 ```
 
+### The token is mandatory now
+
+`daemon\main.py` reads `daemon\.env` itself and **refuses to start without `BRIDGE_TOKEN`** (it can reveal Wi-Fi passwords — an open daemon behind a public tunnel would be a real problem). One line is enough:
+
+```powershell
+"BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec" | Set-Content .\daemon\.env -Encoding ascii
+```
+
+It binds `127.0.0.1` by default; tunnels proxy to localhost, so nothing on your LAN can reach it. Set `BRIDGE_HOST=0.0.0.0` only if you really want that.
+
 ### Permanent URL (no terminal, no changing link)
 
 Quick tunnels (`*.trycloudflare.com`) die with the window and change every restart. Install a real one instead:

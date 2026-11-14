@@ -244,7 +244,7 @@ if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Whitty Hybrid permanent Cloudflare tunnel" | Out-Null
   Start-ScheduledTask -TaskName $taskName
-  Write-Host "  ✅ installed scheduled task '$taskName' (starts at logon, restarts on failure)" -ForegroundColor Green
+  Write-Host "  OK installed scheduled task '$taskName' (starts at logon, restarts on failure)" -ForegroundColor Green
 } else {
   Write-Host "  ! ScheduledTask cmdlets unavailable - start it manually:" -ForegroundColor Yellow
   Write-Host "      cloudflared tunnel --config `"$config`" run $tunnelName" -ForegroundColor White

@@ -23,8 +23,14 @@ const ALLOWED_HOSTS = [
 
 export function resolveBridgeUrl(override?: string | null): string {
   if (!override) return DEFAULT_URL;
-  const url = String(override).trim().replace(/\/$/, "");
+  // Be forgiving about what gets pasted in: "tailscale funnel" prints the URL
+  // with a trailing slash, people paste it without a scheme, or with whitespace.
+  let url = String(override).trim().replace(/\/+$/, "");
   if (!url) return DEFAULT_URL;
+  if (!/^https?:\/\//i.test(url)) {
+    const bareLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url);
+    url = `${bareLocal ? "http" : "https"}://${url}`;
+  }
   if (url === DEFAULT_URL) return url;
   if (ALLOWED_HOSTS.some((re) => re.test(url))) return url;
   try {
