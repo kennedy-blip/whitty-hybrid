@@ -16,7 +16,8 @@ if ($branch -and $branch -ne "main") {
   Write-Host "  ! You are on branch '$branch'. 'main' carries the newest daemon code." -ForegroundColor Yellow
   Write-Host "    Switch with:  git checkout main; git pull" -ForegroundColor Yellow
 }
-$reqPath = Join-Path $root "daemonequirements.txt"
+$reqPath = Join-Path $root "daemon
+equirements.txt"
 if (Test-Path $reqPath) {
   $pinned = Select-String -Path $reqPath -Pattern '^\s*pydantic==2\.(9|1[01])' -Quiet
   if ($pinned) {
@@ -133,24 +134,40 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "      2) or point this script at it:  `$env:WHITTY_PYTHON='C:\Python312\python.exe'" -ForegroundColor White
   Write-Host "    Behind a corporate proxy?  `$env:HTTPS_PROXY='http://host:port'" -ForegroundColor Yellow
   Write-Host "    Also check you are on main:  git checkout main; git pull   (stale branches carry old pins)" -ForegroundColor Yellow
+  Write-Host "    If deleting .venv said 'Access is denied', a daemon is still running and holding" -ForegroundColor Yellow
+  Write-Host "    the .dll files. Stop it first:  Get-Process python,pythonw -EA SilentlyContinue | Stop-Process -Force" -ForegroundColor Yellow
   exit 1
 }
 Write-Host "  dependencies OK" -ForegroundColor Green
 
 # ---------- 5. daemon ----------
-Write-Host "  starting daemon on http://localhost:8765 ..." -ForegroundColor Yellow
-$daemon = Start-Process -FilePath $venvPy -ArgumentList "main.py" -PassThru -NoNewWindow
-Start-Sleep -Seconds 4
-if ($daemon.HasExited) {
-  Write-Host "  X daemon exited right away. Run it in the foreground to see why:" -ForegroundColor Red
-  Write-Host "     cd daemon; .\.venv\Scripts\python.exe main.py" -ForegroundColor White
-  exit 1
-}
+$daemon = $null
+$alreadyUp = $false
 try {
-  $probe = Invoke-WebRequest -Uri "http://localhost:8765/health" -UseBasicParsing -TimeoutSec 5
-  Write-Host "  daemon is healthy (HTTP $($probe.StatusCode))" -ForegroundColor Green
-} catch {
-  Write-Host "  ! no answer on /health - check the output above" -ForegroundColor Yellow
+  $h = Invoke-WebRequest -Uri "http://localhost:8765/health" -UseBasicParsing -TimeoutSec 3
+  if ($h.StatusCode -eq 200) { $alreadyUp = $true }
+} catch { $alreadyUp = $false }
+
+if ($alreadyUp) {
+  Write-Host "  a daemon is already answering on :8765 - leaving it alone" -ForegroundColor Green
+  Write-Host "    (stop it first if you want this script to manage it: Get-Process python | Stop-Process)" -ForegroundColor DarkGray
+} else {
+  Write-Host "  starting daemon on http://localhost:8765 ..." -ForegroundColor Yellow
+  $daemon = Start-Process -FilePath $venvPy -ArgumentList "main.py" -PassThru -NoNewWindow
+  Start-Sleep -Seconds 4
+  if ($daemon.HasExited) {
+    Write-Host "  X daemon exited right away. Usual causes:" -ForegroundColor Red
+    Write-Host "     - port 8765 already taken by another daemon (close it, or it is fine as-is)" -ForegroundColor Yellow
+    Write-Host "     - run it in the foreground to see the real error:" -ForegroundColor Yellow
+    Write-Host "         cd daemon; .\.venv\Scripts\python.exe main.py" -ForegroundColor White
+    exit 1
+  }
+  try {
+    $probe = Invoke-WebRequest -Uri "http://localhost:8765/health" -UseBasicParsing -TimeoutSec 5
+    Write-Host "  daemon is healthy (HTTP $($probe.StatusCode))" -ForegroundColor Green
+  } catch {
+    Write-Host "  ! no answer on /health - check the output above" -ForegroundColor Yellow
+  }
 }
 
 # ---------- 6. tunnel ----------
@@ -166,7 +183,7 @@ if (-not $cf) {
   if ($lan) { Write-Host "       this PC looks like:  http://${lan}:8765" -ForegroundColor Cyan }
   Write-Host ""
   Write-Host "  Daemon running. Press Ctrl+C to stop." -ForegroundColor DarkGray
-  Wait-Process -Id $daemon.Id
+  if ($daemon) { Wait-Process -Id $daemon.Id } else { while ($true) { Start-Sleep -Seconds 3600 } }
   exit 0
 }
 
@@ -197,5 +214,5 @@ if ($url) {
 }
 Write-Host ""
 Write-Host "  Running. Press Ctrl+C to stop daemon + tunnel." -ForegroundColor DarkGray
-Wait-Process -Id $daemon.Id
+if ($daemon) { Wait-Process -Id $daemon.Id } else { while ($true) { Start-Sleep -Seconds 3600 } }
 if ($tunnel -and -not $tunnel.HasExited) { Stop-Process -Id $tunnel.Id -ErrorAction SilentlyContinue }
