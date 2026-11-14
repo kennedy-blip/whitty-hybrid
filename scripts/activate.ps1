@@ -9,6 +9,28 @@ Write-Host ""
 Write-Host "  Whitty Hybrid - activating local Hands" -ForegroundColor Cyan
 Write-Host "  repo: $root" -ForegroundColor DarkGray
 
+# ---------- 0. preflight: is this checkout current? ----------
+$branch = ""
+try { $branch = (& git rev-parse --abbrev-ref HEAD 2>$null | Out-String).Trim() } catch { $branch = "" }
+if ($branch -and $branch -ne "main") {
+  Write-Host "  ! You are on branch '$branch'. 'main' carries the newest daemon code." -ForegroundColor Yellow
+  Write-Host "    Switch with:  git checkout main; git pull" -ForegroundColor Yellow
+}
+$reqPath = Join-Path $root "daemonequirements.txt"
+if (Test-Path $reqPath) {
+  $pinned = Select-String -Path $reqPath -Pattern '^\s*pydantic==2\.(9|1[01])' -Quiet
+  if ($pinned) {
+    Write-Host ""
+    Write-Host "  X This checkout still has the OLD pinned requirements (pydantic==2.9.x)." -ForegroundColor Red
+    Write-Host "    Those have no wheel for Python 3.14, so pip tries to compile Rust and fails." -ForegroundColor Red
+    Write-Host "    Fix - update the code first, then rerun:" -ForegroundColor White
+    Write-Host "        git checkout main" -ForegroundColor White
+    Write-Host "        git pull" -ForegroundColor White
+    Write-Host "        .\scripts\activate.ps1" -ForegroundColor White
+    exit 1
+  }
+}
+
 function Get-PyVersion($exe) {
   try { return (& $exe -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null) } catch { return $null }
 }
@@ -110,6 +132,7 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host '           .\.venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor White
   Write-Host "      2) or point this script at it:  `$env:WHITTY_PYTHON='C:\Python312\python.exe'" -ForegroundColor White
   Write-Host "    Behind a corporate proxy?  `$env:HTTPS_PROXY='http://host:port'" -ForegroundColor Yellow
+  Write-Host "    Also check you are on main:  git checkout main; git pull   (stale branches carry old pins)" -ForegroundColor Yellow
   exit 1
 }
 Write-Host "  dependencies OK" -ForegroundColor Green
