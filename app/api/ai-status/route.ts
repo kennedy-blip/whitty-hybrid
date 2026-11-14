@@ -25,6 +25,20 @@ export async function GET(req: Request) {
   };
 
   const url = new URL(req.url);
+
+  if (url.searchParams.get("models") === "1" && groqKey) {
+    try {
+      const res = await fetch(`${GROQ_BASE_URL}/models`, {
+        headers: { Authorization: `Bearer ${groqKey}` },
+        cache: "no-store",
+      });
+      const json: any = await res.json();
+      report.availableModels = Array.isArray(json?.data) ? json.data.map((m: any) => m.id) : json;
+    } catch (err: any) {
+      report.availableModels = { error: String(err?.message || err) };
+    }
+  }
+
   if (url.searchParams.get("ping") === "1" && info.provider === "groq" && groqKey) {
     const started = Date.now();
     try {
