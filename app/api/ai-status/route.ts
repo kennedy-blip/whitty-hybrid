@@ -71,5 +71,39 @@ export async function GET(req: Request) {
     report.ping = { skipped: "no Groq key configured" };
   }
 
+  // ?selftest=1 runs one real agent turn (model + tool call + answer) so the
+  // chat can be proven end-to-end without a browser.
+  if (url.searchParams.get("selftest") === "1" && resolved) {
+    const started = Date.now();
+    try {
+      const { generateText, tool } = await import("ai");
+      const { z } = await import("zod");
+      const { checkDns } = await import("@/lib/cloud-tools");
+      const out = await generateText({
+        model: resolved.model,
+        maxSteps: 3,
+        system: "You are a diagnostic agent. Use the tool when asked about DNS, then answer in one short sentence.",
+        prompt: "Use check_dns for example.com and tell me the A record.",
+        tools: {
+          check_dns: tool({
+            description: "Query A/CNAME/MX/TXT records for a domain",
+            parameters: z.object({ domain: z.string() }),
+            execute: async ({ domain }) => checkDns(domain),
+          }),
+        },
+      });
+      const calls = (out.steps || []).flatMap((st: any) => (st.toolCalls || []).map((c: any) => `${c.toolName}(${JSON.stringify(c.args)})`));
+      report.selftest = {
+        ok: true,
+        ms: Date.now() - started,
+        toolCalls: calls,
+        steps: out.steps?.length ?? 0,
+        text: (out.text || "").slice(0, 400),
+      };
+    } catch (err: any) {
+      report.selftest = { ok: false, ms: Date.now() - started, error: String(err?.message || err) };
+    }
+  }
+
   return NextResponse.json(report);
 }
