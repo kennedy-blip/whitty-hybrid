@@ -2,7 +2,7 @@ import { streamText, tool } from "ai";
 import { z } from "zod";
 import { checkDns, checkSsl, checkCors, checkApiHealth } from "@/lib/cloud-tools";
 import { bridgeExecute, bridgeUrlFromRequest } from "@/lib/bridge";
-import { getModel, providerInfo } from "@/lib/model";
+import { resolveModel, modelFailure, providerInfo } from "@/lib/model";
 import { logAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -36,7 +36,24 @@ export async function POST(req: Request) {
 async function handle(req: Request) {
   const { messages } = await req.json();
   const bridgeBase = bridgeUrlFromRequest(req);
-  const model = getModel();
+  const resolved = await resolveModel();
+  const model = resolved?.model ?? null;
+
+  if (!model && providerInfo().provider !== "none") {
+    // A key exists but no model id works for this account. Say so, loudly.
+    const tried = (modelFailure()?.tried || []).map((t) => `${t.id} -> ${t.detail || "failed"}`).join("\n");
+    const text =
+      `The AI key is configured but no usable model was found for it.\n\nTried:\n${tried}\n\n` +
+      `Fix: set GROQ_MODEL in Vercel to a model your account can use ` +
+      `(open /api/ai-status?models=1 on this site to list the ids your key can use).`;
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(`0:${JSON.stringify(text)}\n`));
+        c.close();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  }
 
   if (!model) {
     // Demo mode: no AI key configured — stream guidance instead of failing.
@@ -52,10 +69,11 @@ async function handle(req: Request) {
   }
 
   const info = providerInfo();
+  console.log(`[chat] provider=${info.provider} model=${resolved?.id} (${resolved?.source})`);
 
   const result = streamText({
     model,
-    system: `You are Whitty, a hybrid diagnostic agent running on ${info.provider} (${info.model}).
+    system: `You are Whitty, a hybrid diagnostic agent running on ${info.provider} (${resolved?.id || info.model}).
 You have CLOUD tools (DNS, SSL, CORS, API health) that run instantly on Vercel, and LOCAL tools (Wi-Fi scan, saved Wi-Fi passwords, ports, power-state, network recovery, VPN) that run on the user's own PC through a bridge daemon.
 
 Tool-chaining: chain multiple tools in one turn to reach a real diagnosis (maxSteps 6). Always finish with a short summary and concrete next steps.

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getModel, providerInfo, GROQ_BASE_URL } from "@/lib/model";
+import { resolveModel, providerInfo, GROQ_BASE_URL, GROQ_FALLBACKS } from "@/lib/model";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,13 +11,17 @@ export async function GET(req: Request) {
   const info = providerInfo();
   const groqKey = process.env.GROQ_API_KEY || "";
   const openaiKey = process.env.OPENAI_API_KEY || "";
-  const model = getModel();
+  const resolved = await resolveModel();
 
   const report: Record<string, any> = {
     provider: info.provider,
     model: info.model,
     baseURL: info.baseURL,
-    modelReady: Boolean(model),
+    modelReady: Boolean(resolved),
+    resolvedModel: resolved?.id ?? null,
+    howResolved: resolved?.source ?? null,
+    fallbackChain: GROQ_FALLBACKS,
+    probe: resolved?.tried ?? [],
     keys: {
       GROQ_API_KEY: groqKey ? `set (${groqKey.slice(0, 6)}...${groqKey.slice(-4)}, ${groqKey.length} chars)` : "missing",
       OPENAI_API_KEY: openaiKey ? `set (${openaiKey.length} chars)` : "missing",
@@ -46,13 +50,14 @@ export async function GET(req: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
         body: JSON.stringify({
-          model: info.model,
+          model: resolved?.id || info.model,
           messages: [{ role: "user", content: "ping" }],
           max_tokens: 1,
         }),
         cache: "no-store",
       });
       const body = await res.text();
+      report.pingedModel = resolved?.id || info.model;
       report.ping = {
         ok: res.ok,
         status: res.status,
