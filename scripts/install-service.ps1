@@ -149,10 +149,20 @@ if ($StartNow) {
   }
   if (-not $healthy) {
     Write-Host "  ! no answer on http://localhost:8765/health after 20s." -ForegroundColor Yellow
-    Write-Host "    Task Scheduler > $taskName > Last Run Result:" -ForegroundColor Yellow
-    Write-Host "      0x0   = still starting / already running" -ForegroundColor DarkGray
-    Write-Host "      0x1   = python crashed - run daemon\main.py in a terminal to see why" -ForegroundColor DarkGray
-    Write-Host "    Commonest cause: daemon\.env missing or no BRIDGE_TOKEN in it." -ForegroundColor Yellow
+    $logFile = Join-Path $daemonDir "daemon.log"
+    if (Test-Path -LiteralPath $logFile) {
+      Write-Host ""
+      Write-Host "  --- last lines of daemon\daemon.log ---" -ForegroundColor Cyan
+      Get-Content -LiteralPath $logFile -Tail 25 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+      Write-Host "  --------------------------------------" -ForegroundColor Cyan
+    } else {
+      Write-Host "    No daemon.log yet - the process never got far enough to write one." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "  Next step: run the built-in check, it names the problem directly:" -ForegroundColor Yellow
+    Write-Host "     cd $daemonDir" -ForegroundColor White
+    Write-Host "     .\.venv\Scripts\python.exe main.py --selftest" -ForegroundColor White
+    Write-Host "  It reports token presence, whether port 8765 is already taken, and imports." -ForegroundColor DarkGray
   }
 } else {
   Write-Host "  It starts automatically the next time you log in." -ForegroundColor DarkGray

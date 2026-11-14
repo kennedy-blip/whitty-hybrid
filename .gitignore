@@ -10,3 +10,5 @@ dist/
 
 # daemon secrets
 daemon/.env
+daemon/daemon.log
+daemon/daemon.log.old

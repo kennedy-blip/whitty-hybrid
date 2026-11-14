@@ -6,8 +6,50 @@ Run:  python main.py          (serves on 0.0.0.0:8765)
 Prod: expose with Cloudflare Tunnel:  cloudflared tunnel --url http://localhost:8765
       then set BRIDGE_URL=https://<tunnel-host> on Vercel.
 """
-import os, json, time, hmac
+import os, sys, json, time, hmac
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# A Scheduled Task launches pythonw.exe, which has NO console: sys.stdout and
+# sys.stderr are None. uvicorn's logging writes to them at startup, so the
+# process used to die silently with no trace anywhere (Task Scheduler showed
+# 0x1 and nothing else). Point both at daemon.log instead - a background
+# daemon that cannot explain itself is not debuggable.
+# ---------------------------------------------------------------------------
+def _init_headless_logging():
+    log_path = Path(__file__).with_name("daemon.log")
+    if sys.stdout is not None and sys.stderr is not None:
+        return log_path
+    try:
+        if log_path.exists() and log_path.stat().st_size > 2_000_000:
+            log_path.replace(log_path.with_name("daemon.log.old"))
+    except Exception:
+        pass
+    try:
+        fh = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)
+    except Exception:
+        return log_path
+    if sys.stdout is None:
+        sys.stdout = fh
+    if sys.stderr is None:
+        sys.stderr = fh
+    return log_path
+
+
+LOG_PATH = _init_headless_logging()
+
+
+def _excepthook(exc_type, exc, tb):
+    import traceback
+    try:
+        sys.stderr.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] unhandled exception\n")
+        traceback.print_exception(exc_type, exc, tb, file=sys.stderr)
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+sys.excepthook = _excepthook
 
 # Load daemon/.env (simple KEY=VALUE) so you don't have to export vars every time.
 _env = Path(__file__).with_name(".env")
@@ -28,29 +70,6 @@ from audit_log import log, recent
 
 app = FastAPI(title="Whitty Hybrid Daemon", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-def _load_env():
-    """Read daemon/.env so `python main.py` (and the Scheduled Task) pick up the
-    token without relying on the shell that started it. Existing env vars win."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.exists(path):
-        return
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, val = line.split("=", 1)
-                key = key.strip()
-                val = val.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except Exception as exc:  # never block startup on a malformed .env
-        print(f"[env] could not read .env: {exc}")
-
-
-_load_env()
 
 TOKEN = os.environ.get("BRIDGE_TOKEN", "").strip()
 HOST = os.environ.get("BRIDGE_HOST", "127.0.0.1").strip() or "127.0.0.1"
@@ -129,8 +148,41 @@ async def execute(req: Request, authorization: str | None = Header(None)):
 @app.get("/health")
 def health(): return {"ok": True, "auth": "token", "bind": HOST}
 
+def _port_free(host: str, port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+        sk.settimeout(0.5)
+        return sk.connect_ex((host if host != "0.0.0.0" else "127.0.0.1", port)) != 0
+
+
+def _selftest():
+    """python main.py --selftest - explains why the background daemon won't run."""
+    print(f"python        : {sys.version.split()[0]}")
+    print(f"token         : {'set (' + str(len(TOKEN)) + ' chars)' if TOKEN else 'MISSING -> daemon refuses to start'}")
+    print(f".env present  : {Path(__file__).with_name('.env').exists()}")
+    print(f"bind          : {HOST}:8765")
+    print(f"port free     : {_port_free(HOST, 8765)}" + ("" if _port_free(HOST, 8765) else "  <- something already listens here"))
+    print(f"log file      : {LOG_PATH}")
+    for mod in ("wifi_scanner", "network_tools", "vpn_manager", "audit_log"):
+        try:
+            __import__(mod)
+            print(f"import {mod:<14}: ok")
+        except Exception as exc:
+            print(f"import {mod:<14}: FAILED - {exc}")
+    return 0 if TOKEN else 2
+
+
 if __name__ == "__main__":
-    print(f"Whitty Hybrid Daemon starting on {HOST}:8765 ...")
-    print("token: loaded" + (" from .env" if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")) else " from environment"))
-    print("Expose with:  tailscale funnel --bg 8765   (or cloudflared tunnel --url http://localhost:8765)")
-    uvicorn.run(app, host=HOST, port=8765)
+    if "--selftest" in sys.argv:
+        raise SystemExit(_selftest())
+    started = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n[{started}] Whitty Hybrid Daemon starting on {HOST}:8765")
+    print(f"[{started}] token loaded ({len(TOKEN)} chars), .env={Path(__file__).with_name('.env').exists()}")
+    print(f"[{started}] expose with: tailscale funnel --bg 8765  (or cloudflared tunnel --url http://localhost:8765)")
+    try:
+        uvicorn.run(app, host=HOST, port=8765)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] FATAL: {exc}")
+        raise SystemExit(1)

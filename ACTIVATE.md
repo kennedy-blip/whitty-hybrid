@@ -169,3 +169,6 @@ scp scripts/deploy-vps.sh root@YOUR_VPS:/root/
 ssh root@YOUR_VPS "bash /root/deploy-vps.sh"
 ```
 Then in the VPN panel enter `YOUR_VPS_IP:51820` → **Generate** → **Apply to My PC**.
+
+## Troubleshooting
+| Daemon starts then stops / no `/health` | It now writes `daemon\daemon.log` (pythonw has no console). Read it, or run `daemon\.venv\Scripts\python.exe main.py --selftest` for token/port/import checks |
