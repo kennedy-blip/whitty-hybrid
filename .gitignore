@@ -5,7 +5,7 @@ daemon/*.db
 daemon/*.sqlite*
 __pycache__/
 *.pyc
-.venv/
+.venv*/
 dist/
 
 # daemon secrets

@@ -61,8 +61,20 @@ if [ -z "${BRIDGE_TOKEN:-}" ]; then
 fi
 export BRIDGE_TOKEN
 
-# ---------- venv (rebuilt if it came from another Python) ----------
+# ---------- venv (repaired if damaged, rebuilt if from another Python) ----------
 cd daemon
+if [ -d .venv ] && { [ ! -f .venv/pyvenv.cfg ] || [ ! -x .venv/bin/python ]; }; then
+  echo "  .venv is damaged (no pyvenv.cfg or python) — repairing"
+  "$PY" -m venv --clear .venv || {
+    rm -rf .venv 2>/dev/null || true
+    if [ -d .venv ]; then
+      echo "  could not remove .venv (files locked by a running daemon) — using .venv2"
+      "$PY" -m venv .venv2 && mv -f .venv2 .venv 2>/dev/null || true
+    else
+      "$PY" -m venv .venv
+    fi
+  }
+fi
 if [ -d .venv ] && [ -f .venv/pyvenv.cfg ]; then
   EXISTING=$(grep -Eo 'version(_info)? *= *"?[0-9]+\.[0-9]+' .venv/pyvenv.cfg | grep -Eo '[0-9]+\.[0-9]+' | head -n1 || true)
   if [ -n "$EXISTING" ] && [ "$EXISTING" != "$PYVER" ]; then

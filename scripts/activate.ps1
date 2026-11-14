@@ -1,29 +1,42 @@
 # Whitty Hybrid - one-command activation for Windows
 #   .\scripts\activate.ps1        (or .\whitty.ps1)
 # Token comes from $env:BRIDGE_TOKEN, daemon\.env, or an interactive prompt.
-# Force a specific interpreter with:  $env:WHITTY_PYTHON="C:\Python312\python.exe"
+# Force a specific interpreter with:  $env:WHITTY_PYTHON="C:\Python313\python.exe"
 $ErrorActionPreference = "Continue"
-Set-Location (Join-Path $PSScriptRoot "..")
-$root = Get-Location
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = (Resolve-Path (Join-Path $scriptDir "..")).Path
+$daemonDir = Join-Path $root "daemon"
+Set-Location $root
+
 Write-Host ""
 Write-Host "  Whitty Hybrid - activating local Hands" -ForegroundColor Cyan
 Write-Host "  repo: $root" -ForegroundColor DarkGray
 
-# ---------- 0. preflight: is this checkout current? ----------
+function Get-PyVersion([string]$exe) {
+  try { return (& $exe -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null) } catch { return $null }
+}
+
+function Test-Venv([string]$dir) {
+  if (-not (Test-Path -LiteralPath $dir)) { return $false }
+  $pyExe = Join-Path (Join-Path $dir "Scripts") "python.exe"
+  $cfg = Join-Path $dir "pyvenv.cfg"
+  return ((Test-Path -LiteralPath $pyExe) -and (Test-Path -LiteralPath $cfg))
+}
+
+# ---------- 0. preflight: current checkout? ----------
 $branch = ""
 try { $branch = (& git rev-parse --abbrev-ref HEAD 2>$null | Out-String).Trim() } catch { $branch = "" }
 if ($branch -and $branch -ne "main") {
   Write-Host "  ! You are on branch '$branch'. 'main' carries the newest daemon code." -ForegroundColor Yellow
   Write-Host "    Switch with:  git checkout main; git pull" -ForegroundColor Yellow
 }
-$reqPath = Join-Path $root "daemon
-equirements.txt"
-if (Test-Path $reqPath) {
-  $pinned = Select-String -Path $reqPath -Pattern '^\s*pydantic==2\.(9|1[01])' -Quiet
-  if ($pinned) {
+$reqPath = Join-Path $daemonDir "requirements.txt"
+if (Test-Path -LiteralPath $reqPath) {
+  if (Select-String -LiteralPath $reqPath -Pattern '^\s*pydantic==2\.(9|1[01])' -Quiet) {
     Write-Host ""
     Write-Host "  X This checkout still has the OLD pinned requirements (pydantic==2.9.x)." -ForegroundColor Red
-    Write-Host "    Those have no wheel for Python 3.14, so pip tries to compile Rust and fails." -ForegroundColor Red
+    Write-Host "    Those have no wheel for Python 3.13/3.14, so pip tries to build Rust and fails." -ForegroundColor Red
     Write-Host "    Fix - update the code first, then rerun:" -ForegroundColor White
     Write-Host "        git checkout main" -ForegroundColor White
     Write-Host "        git pull" -ForegroundColor White
@@ -32,24 +45,18 @@ if (Test-Path $reqPath) {
   }
 }
 
-function Get-PyVersion($exe) {
-  try { return (& $exe -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null) } catch { return $null }
-}
-
 # ---------- 1. pick a Python ----------
 $py = $null
 if ($env:WHITTY_PYTHON) {
-  if (Test-Path $env:WHITTY_PYTHON) { $py = $env:WHITTY_PYTHON }
+  if (Test-Path -LiteralPath $env:WHITTY_PYTHON) { $py = $env:WHITTY_PYTHON }
   else { Write-Host "  ! WHITTY_PYTHON points to a missing file - ignoring" -ForegroundColor Yellow }
 }
 if (-not $py) {
-  # Prefer a slightly older, thoroughly-supported interpreter when the py launcher has one:
-  # brand-new CPython releases are the usual cause of "no wheel, must compile" failures.
   $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
   if ($pyLauncher) {
     foreach ($v in @("-3.13", "-3.12", "-3.11")) {
       $cand = & $pyLauncher.Source $v -c "import sys;print(sys.executable)" 2>$null
-      if ($LASTEXITCODE -eq 0 -and $cand) { $py = $cand.Trim(); break }
+      if ($LASTEXITCODE -eq 0 -and $cand) { $py = ($cand | Out-String).Trim(); break }
     }
   }
 }
@@ -61,81 +68,100 @@ if (-not $py) {
 }
 if (-not $py) {
   Write-Host "`n  X Python 3 not found." -ForegroundColor Red
-  Write-Host "    Install Python 3.12 or 3.13 from https://python.org/downloads and tick 'Add python.exe to PATH'." -ForegroundColor Yellow
+  Write-Host "    Install Python 3.12 or 3.13 from https://python.org/downloads (tick 'Add python.exe to PATH')." -ForegroundColor Yellow
   Write-Host "    Then open a NEW PowerShell window and rerun this script." -ForegroundColor Yellow
   exit 1
 }
 $pyVer = Get-PyVersion $py
 Write-Host "  python: $py ($pyVer)" -ForegroundColor DarkGray
 
-$verParts = $pyVer.Split(".")
-$major = [int]$verParts[0]; $minor = [int]$verParts[1]
+$parts = "$pyVer".Split(".")
+$major = [int]$parts[0]
+$minor = [int]$parts[1]
 if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 9)) {
   Write-Host "  X Python $pyVer is too old - 3.9 or newer required." -ForegroundColor Red
   exit 1
 }
 if ($major -eq 3 -and $minor -ge 15) {
-  Write-Host "  ! Python $pyVer is very new - some packages may not have wheels yet." -ForegroundColor Yellow
-  Write-Host "    If install fails, install 3.12/3.13 and set WHITTY_PYTHON to its python.exe" -ForegroundColor Yellow
+  Write-Host "  ! Python $pyVer is newer than the published wheels - install may fail." -ForegroundColor Yellow
+  Write-Host "    If it does, install 3.13 and set `$env:WHITTY_PYTHON to its python.exe" -ForegroundColor Yellow
 }
 
 # ---------- 2. token ----------
 if (-not $env:BRIDGE_TOKEN) {
-  $envFile = Join-Path $root "daemon\.env"
-  if (Test-Path $envFile) {
-    Get-Content $envFile | ForEach-Object {
+  $envFile = Join-Path $daemonDir ".env"
+  if (Test-Path -LiteralPath $envFile) {
+    Get-Content -LiteralPath $envFile | ForEach-Object {
       if ($_ -match '^\s*BRIDGE_TOKEN\s*=\s*(.+?)\s*$') { $env:BRIDGE_TOKEN = $Matches[1].Trim('"').Trim("'") }
     }
   }
 }
 if (-not $env:BRIDGE_TOKEN) {
-  Write-Host "`n  Paste the BRIDGE_TOKEN from Vercel -> whitty-hybrid -> Settings -> Environment Variables" -ForegroundColor Yellow
+  Write-Host ""
+  Write-Host "  Paste the BRIDGE_TOKEN from Vercel -> whitty-hybrid -> Settings -> Environment Variables" -ForegroundColor Yellow
   $env:BRIDGE_TOKEN = Read-Host "  BRIDGE_TOKEN"
 }
 if (-not $env:BRIDGE_TOKEN) { Write-Host "  ! No token given - the cloud app will get 401s." -ForegroundColor Red }
 
-# ---------- 3. venv (recreated if it was built by a different Python) ----------
-Set-Location (Join-Path $root "daemon")
-if (Test-Path ".venv") {
-  $cfg = Join-Path (Get-Location) ".venv\pyvenv.cfg"
-  $stale = $false
-  if (Test-Path $cfg) {
-    $raw = Get-Content $cfg -Raw
+# ---------- 3. venv (repairs a damaged or foreign one) ----------
+Set-Location $daemonDir
+$venvDir = Join-Path $daemonDir ".venv"
+
+if ((Test-Path -LiteralPath $venvDir) -and -not (Test-Venv $venvDir)) {
+  Write-Host "  .venv is damaged (no pyvenv.cfg or python.exe) - repairing" -ForegroundColor Yellow
+  & $py -m venv --clear $venvDir 2>$null
+  if (-not (Test-Venv $venvDir)) {
+    Remove-Item -LiteralPath $venvDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $venvDir) {
+      Write-Host "  could not delete .venv (a daemon may be holding its files) - building .venv2 instead" -ForegroundColor Yellow
+      Write-Host "    stop the old daemon:  Get-Process python,pythonw -EA SilentlyContinue | Stop-Process -Force" -ForegroundColor Yellow
+      $venvDir = Join-Path $daemonDir ".venv2"
+    }
+    & $py -m venv $venvDir
+  }
+}
+
+if (Test-Path -LiteralPath $venvDir) {
+  $cfg = Join-Path $venvDir "pyvenv.cfg"
+  if (Test-Path -LiteralPath $cfg) {
+    $raw = Get-Content -LiteralPath $cfg -Raw
     if ($raw -match 'version(?:_info)?\s*=\s*"?(\d+\.\d+)') {
-      if ($Matches[1] -ne $pyVer) { $stale = $true }
+      if ($Matches[1] -ne $pyVer) {
+        Write-Host "  existing env uses Python $($Matches[1]) - rebuilding for $pyVer" -ForegroundColor Yellow
+        & $py -m venv --clear $venvDir
+      }
     }
   }
-  if ($stale) {
-    Write-Host "  existing .venv uses a different Python - rebuilding it" -ForegroundColor Yellow
-    Remove-Item -Recurse -Force ".venv"
-  }
 }
-if (-not (Test-Path ".venv")) {
+
+if (-not (Test-Path -LiteralPath $venvDir)) {
   Write-Host "  creating virtualenv ..." -ForegroundColor DarkGray
-  & $py -m venv .venv
-  if ($LASTEXITCODE -ne 0) { Write-Host "  X venv creation failed" -ForegroundColor Red; exit 1 }
+  & $py -m venv $venvDir
 }
-$venvPy = Join-Path (Get-Location) ".venv\Scripts\python.exe"
-if (-not (Test-Path $venvPy)) { Write-Host "  X .venv\Scripts\python.exe missing - delete .venv and rerun" -ForegroundColor Red; exit 1 }
+if (-not (Test-Venv $venvDir)) {
+  Write-Host "  X Could not create a working virtualenv in $venvDir" -ForegroundColor Red
+  Write-Host "    Stop any running daemon, delete the folder, and retry:" -ForegroundColor Yellow
+  Write-Host "        Get-Process python,pythonw -EA SilentlyContinue | Stop-Process -Force" -ForegroundColor White
+  Write-Host "        Remove-Item -Recurse -Force `"$venvDir`"" -ForegroundColor White
+  exit 1
+}
+$venvPy = Join-Path (Join-Path $venvDir "Scripts") "python.exe"
 
 # ---------- 4. dependencies ----------
 Write-Host "  installing dependencies (first run ~30s) ..." -ForegroundColor DarkGray
 & $venvPy -m pip install --quiet --disable-pip-version-check --upgrade pip 2>$null
-# --prefer-binary: never build from source when a wheel exists.
-& $venvPy -m pip install --disable-pip-version-check --prefer-binary -r requirements.txt
+& $venvPy -m pip install --disable-pip-version-check --prefer-binary -r (Join-Path $daemonDir "requirements.txt")
 if ($LASTEXITCODE -ne 0) {
   Write-Host ""
   Write-Host "  X Dependency install failed." -ForegroundColor Red
-  Write-Host "    Most common cause: your Python is newer than the wheels published for it" -ForegroundColor Yellow
-  Write-Host "    (a source build then needs a Rust/C compiler). Fix it with either:" -ForegroundColor Yellow
-  Write-Host "      1) install Python 3.12 or 3.13, then:" -ForegroundColor White
-  Write-Host '           py -3.12 -m venv .venv' -ForegroundColor White
-  Write-Host '           .\.venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor White
-  Write-Host "      2) or point this script at it:  `$env:WHITTY_PYTHON='C:\Python312\python.exe'" -ForegroundColor White
+  Write-Host "    Most common causes:" -ForegroundColor Yellow
+  Write-Host "      1) your Python is newer than the published wheels (a source build needs Rust/C)" -ForegroundColor Yellow
+  Write-Host "      2) the .venv is damaged or half-deleted (stop any daemon, then delete it)" -ForegroundColor Yellow
+  Write-Host "      3) a stale checkout with old pins - run: git checkout main; git pull" -ForegroundColor Yellow
+  Write-Host "    Try a clean env with a known-good interpreter:" -ForegroundColor White
+  Write-Host "        py -3.13 -m venv --clear `"$venvDir`"" -ForegroundColor White
+  Write-Host "        & `"$venvPy`" -m pip install -r requirements.txt" -ForegroundColor White
   Write-Host "    Behind a corporate proxy?  `$env:HTTPS_PROXY='http://host:port'" -ForegroundColor Yellow
-  Write-Host "    Also check you are on main:  git checkout main; git pull   (stale branches carry old pins)" -ForegroundColor Yellow
-  Write-Host "    If deleting .venv said 'Access is denied', a daemon is still running and holding" -ForegroundColor Yellow
-  Write-Host "    the .dll files. Stop it first:  Get-Process python,pythonw -EA SilentlyContinue | Stop-Process -Force" -ForegroundColor Yellow
   exit 1
 }
 Write-Host "  dependencies OK" -ForegroundColor Green
@@ -150,16 +176,16 @@ try {
 
 if ($alreadyUp) {
   Write-Host "  a daemon is already answering on :8765 - leaving it alone" -ForegroundColor Green
-  Write-Host "    (stop it first if you want this script to manage it: Get-Process python | Stop-Process)" -ForegroundColor DarkGray
+  Write-Host "    (stop it first if you want this script to manage it)" -ForegroundColor DarkGray
 } else {
   Write-Host "  starting daemon on http://localhost:8765 ..." -ForegroundColor Yellow
   $daemon = Start-Process -FilePath $venvPy -ArgumentList "main.py" -PassThru -NoNewWindow
   Start-Sleep -Seconds 4
   if ($daemon.HasExited) {
     Write-Host "  X daemon exited right away. Usual causes:" -ForegroundColor Red
-    Write-Host "     - port 8765 already taken by another daemon (close it, or it is fine as-is)" -ForegroundColor Yellow
+    Write-Host "     - port 8765 already taken by another daemon" -ForegroundColor Yellow
     Write-Host "     - run it in the foreground to see the real error:" -ForegroundColor Yellow
-    Write-Host "         cd daemon; .\.venv\Scripts\python.exe main.py" -ForegroundColor White
+    Write-Host "         cd `"$daemonDir`"; & `"$venvPy`" main.py" -ForegroundColor White
     exit 1
   }
   try {
@@ -189,14 +215,14 @@ if (-not $cf) {
 
 Write-Host "  opening public tunnel ..." -ForegroundColor Yellow
 $log = Join-Path $env:TEMP "whitty-tunnel.log"
-if (Test-Path $log) { Remove-Item $log -Force }
-$tunnel = Start-Process -FilePath $cf.Source -ArgumentList "tunnel","--url","http://localhost:8765" -PassThru -NoNewWindow -RedirectStandardError $log
+if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+$tunnel = Start-Process -FilePath $cf.Source -ArgumentList "tunnel", "--url", "http://localhost:8765" -PassThru -NoNewWindow -RedirectStandardError $log
 
 $url = $null
 for ($i = 0; $i -lt 30 -and -not $url; $i++) {
   Start-Sleep -Seconds 1
-  if (Test-Path $log) {
-    $url = (Select-String -Path $log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' -AllMatches -ErrorAction SilentlyContinue |
+  if (Test-Path -LiteralPath $log) {
+    $url = (Select-String -LiteralPath $log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' -AllMatches -ErrorAction SilentlyContinue |
             ForEach-Object { $_.Matches.Value } | Select-Object -First 1)
   }
 }
