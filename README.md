@@ -44,7 +44,9 @@ python main.py
 Then paste the tunnel URL into the app's **🔗 Connect my PC** card (or set `BRIDGE_URL` on Vercel).
 
 ### Keep it running
-`scripts/install-service.ps1` (Windows Scheduled Task) or `scripts/install-service.sh` (systemd user unit) runs the daemon in the background at logon — no terminal required. Quick-tunnel URLs still change per restart; use a named Cloudflare tunnel or Tailscale for a stable address.
+`scripts/install-service.ps1` (Windows Scheduled Task) or `scripts/install-service.sh` (systemd user unit) runs the daemon in the background at logon — no terminal required.
+
+`scripts/install-tunnel.ps1` / `.sh` gives the tunnel the same treatment: **`-Mode tailscale`** (stable `https://<pc>.<tailnet>.ts.net`, no domain) or **`-Mode cloudflare -Hostname witty.yourdomain.com`** (named tunnel + scheduled task). No more re-pasting URLs after a reboot.
 
 ### Python version note
 The daemon needs **Python 3.9+**; **3.12 or 3.13 is recommended**. Dependencies are ranged rather than pinned so pip always downloads a prebuilt wheel — brand-new interpreters (e.g. 3.14) may lack wheels and trigger a Rust source build. Override the interpreter with `WHITTY_PYTHON=/path/to/python3.12` (or `$env:WHITTY_PYTHON` on Windows).
@@ -63,3 +65,5 @@ The daemon needs **Python 3.9+**; **3.12 or 3.13 is recommended**. Dependencies 
 | `OPENAI_API_KEY` | Fallback provider if no Groq key (demo mode if neither set) |
 | `BRIDGE_URL` | Daemon URL (localhost or Cloudflare Tunnel) |
 | `BRIDGE_TOKEN` | Shared secret for the bridge |
+| `BRIDGE_ALLOWED_HOSTS` | Extra hostnames the app may use as a bridge (named tunnels on your own domain) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Persistent cloud audit trail (`whitty_audit` table); without them it is per-instance memory |

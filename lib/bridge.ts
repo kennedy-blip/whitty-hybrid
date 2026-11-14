@@ -4,6 +4,14 @@ const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 
 // Only these hosts may be used as a bridge target when the browser supplies one
 // (lets you point at a fresh Cloudflare Tunnel URL without redeploying).
+// Extra hosts you explicitly trust, e.g. BRIDGE_ALLOWED_HOSTS="witty.mydomain.com"
+// (needed once you move from a quick tunnel to a named Cloudflare tunnel that
+// serves your own hostname). Comma-separated, host[:port], no scheme.
+const EXTRA_HOSTS = (process.env.BRIDGE_ALLOWED_HOSTS || "")
+  .split(",")
+  .map((h) => h.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, ""))
+  .filter(Boolean);
+
 const ALLOWED_HOSTS = [
   /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i,
   /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/i,
@@ -18,7 +26,14 @@ export function resolveBridgeUrl(override?: string | null): string {
   const url = String(override).trim().replace(/\/$/, "");
   if (!url) return DEFAULT_URL;
   if (url === DEFAULT_URL) return url;
-  return ALLOWED_HOSTS.some((re) => re.test(url)) ? url : DEFAULT_URL;
+  if (ALLOWED_HOSTS.some((re) => re.test(url))) return url;
+  try {
+    const host = new URL(url).host.toLowerCase();
+    if (EXTRA_HOSTS.includes(host)) return url;
+  } catch {
+    return DEFAULT_URL;
+  }
+  return DEFAULT_URL;
 }
 
 export function bridgeUrlFromRequest(req: Request): string {

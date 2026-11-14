@@ -13,7 +13,7 @@ export const maxDuration = 60;
 // (requiresApproval) is surfaced to the UI as an Approve / Reject card.
 async function localTool(name: string, args: Record<string, any>, base?: string) {
   const res = await bridgeExecute(name, args, base);
-  logAudit({ tool: name, args, result: res.data, approved: null, source: "ai" });
+  await logAudit({ tool: name, args, result: res.data, approved: null, source: "ai" });
   return res.data;
 }
 
