@@ -12,6 +12,23 @@ echo "  repo: $ROOT"
 
 ver() { "$1" -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>/dev/null || true; }
 
+# ---------- preflight: is this checkout current? ----------
+if command -v git >/dev/null 2>&1; then
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ -n "${BRANCH:-}" ] && [ "$BRANCH" != "main" ]; then
+    echo "  ! You are on branch '$BRANCH'. 'main' carries the newest daemon code."
+    echo "    Switch with:  git checkout main && git pull"
+  fi
+fi
+if [ -f daemon/requirements.txt ] && grep -Eq '^[[:space:]]*pydantic==2\.(9|1[01])' daemon/requirements.txt; then
+  echo ""
+  echo "  ✗ This checkout still has the OLD pinned requirements (pydantic==2.9.x)." >&2
+  echo "    No wheel exists for newer Pythons, so pip compiles Rust and fails." >&2
+  echo "    Fix — update the code, then rerun:" >&2
+  echo "        git checkout main && git pull && bash whitty.sh" >&2
+  exit 1
+fi
+
 # ---------- pick a Python ----------
 PY=""
 if [ -n "${WHITTY_PYTHON:-}" ] && [ -x "${WHITTY_PYTHON}" ]; then
