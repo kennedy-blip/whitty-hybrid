@@ -16,6 +16,7 @@ const LOCAL: ToolDef[] = [
   { id: "adapter_power_status", label: "Adapter Power", desc: "Aggressive sleep detection", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
   { id: "list_ports", label: "Ports & PIDs", desc: "TCP/UDP → PID → path", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
   { id: "system_overview", label: "System Overview", desc: "CPU, memory, interfaces, IPs", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
+  { id: "wifi_saved_passwords", label: "Saved Wi-Fi Passwords", desc: "Reveal stored keys from the OS key store", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "", mutating: true },
   { id: "network_recovery", label: "Network Recovery", desc: "Flush DNS / renew DHCP / Winsock", endpoint: "/api/bridge/execute", inputLabel: "Action", placeholder: "flush_dns", mutating: true },
   { id: "disable_adapter_sleep", label: "Disable Sleep", desc: "Fix random Wi-Fi drops", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "", mutating: true },
 ];

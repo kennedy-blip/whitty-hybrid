@@ -111,3 +111,106 @@ def disable_adapter_sleep():
         out = _run(["bash", "-c", "iw dev wlan0 set power_save off 2>&1; iwconfig wlan0 power off 2>&1"])
         return {"ok": True, "output": out}
     return {"ok": False, "error": f"Unsupported platform: {os_name}"}
+
+
+KEY_RE = re.compile(r"Key Content\s*:\s*(.+)", re.IGNORECASE)
+PROFILE_RE = re.compile(r"^\s*(?:All User Profile|Profile)\s*:\s*(.+?)\s*$", re.IGNORECASE)
+
+
+def saved_passwords():
+    """Sensitive/mutating: read saved Wi-Fi profiles back out of the OS key store.
+
+    Windows : netsh wlan show profile name="X" key=clear  -> "Key Content"
+    macOS   : security find-generic-password -wa "<SSID>" (may prompt for keychain access)
+    Linux   : /etc/NetworkManager/system-connections/*.nmconnection (needs root)
+
+    Requires human approval in the UI because it exposes real credentials.
+    """
+    os_name = platform.system()
+    if os_name == "Windows":
+        return _saved_windows()
+    if os_name == "Darwin":
+        return _saved_macos()
+    return _saved_linux()
+
+
+def _saved_windows():
+    listing = _run(["netsh", "wlan", "show", "profiles"])
+    names, seen = [], set()
+    for line in listing.splitlines():
+        m = PROFILE_RE.match(line)
+        if m:
+            name = m.group(1).strip()
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                names.append(name)
+
+    networks = []
+    for name in names:
+        out = _run(["netsh", "wlan", "show", "profile", f'name={name}', "key=clear"])
+        password = None
+        auth = None
+        cipher = None
+        for line in out.splitlines():
+            if password is None:
+                km = KEY_RE.search(line)
+                if km:
+                    password = km.group(1).strip()
+                    continue
+            low = line.strip()
+            if low.lower().startswith("authentication"):
+                auth = low.split(":", 1)[1].strip() if ":" in low else auth
+            elif low.lower().startswith("cipher"):
+                cipher = low.split(":", 1)[1].strip() if ":" in low else cipher
+        needs_admin = password is None and "elevat" in out.lower()
+        networks.append({
+            "ssid": name,
+            "password": password,
+            "auth": auth,
+            "cipher": cipher,
+            "open": (auth or "").lower().startswith("open"),
+            "note": "run the daemon as Administrator to read this password" if needs_admin else None,
+        })
+    return {
+        "platform": "Windows",
+        "count": len(networks),
+        "networks": networks,
+        "warning": "These are real saved credentials. Nothing is stored by Whitty; only the local audit log records that this tool ran.",
+    }
+
+
+def _saved_macos():
+    listing = _run(["/usr/sbin/networksetup", "-listpreferredwirelessnetworks", "en0"])
+    names = [l.strip() for l in listing.splitlines()[1:] if l.strip()]
+    networks = []
+    for name in names:
+        pw = _run(["/usr/bin/security", "find-generic-password", "-D", "AirPort network password", "-a", name, "-w"]).strip()
+        networks.append({"ssid": name, "password": pw or None,
+                         "note": None if pw else "keychain denied or not saved - allow access when macOS prompts"})
+    return {"platform": "macOS", "count": len(networks), "networks": networks,
+            "warning": "These are real saved credentials from your keychain."}
+
+
+def _saved_linux():
+    import glob
+    entries = []
+    for path in glob.glob("/etc/NetworkManager/system-connections/*"):
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                text = fh.read()
+        except PermissionError:
+            entries.append({"file": path, "error": "permission denied - run the daemon with sudo"})
+            continue
+        except Exception as exc:
+            entries.append({"file": path, "error": str(exc)})
+            continue
+        ssid = psk = None
+        for line in text.splitlines():
+            if line.startswith("ssid="):
+                ssid = line.split("=", 1)[1].strip()
+            elif line.startswith("psk="):
+                psk = line.split("=", 1)[1].strip()
+        entries.append({"ssid": ssid or path.rsplit("/", 1)[-1], "password": psk,
+                        "note": None if psk else "enterprise/open network or no stored PSK"})
+    return {"platform": "Linux", "count": len(entries), "networks": entries,
+            "warning": "These are real saved credentials."}

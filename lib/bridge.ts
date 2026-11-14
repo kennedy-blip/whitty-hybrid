@@ -48,6 +48,16 @@ export async function bridgeStatus(baseUrl?: string) {
   return bridgeFetch("/status", {}, baseUrl);
 }
 
-export async function bridgeExecute(tool: string, args: Record<string, any> = {}, baseUrl?: string) {
-  return bridgeFetch("/execute", { method: "POST", body: JSON.stringify({ tool, args }) }, baseUrl);
+// `approved` MUST be a top-level field of the request body — that is what the
+// daemon's safety gate reads (body["approved"]). Nesting it inside `args` makes
+// every mutating call bounce back with "needs human approval".
+export async function bridgeExecute(
+  tool: string,
+  args: Record<string, any> = {},
+  baseUrl?: string,
+  approved?: boolean,
+) {
+  const body: Record<string, any> = { tool, args };
+  if (approved !== undefined) body.approved = approved;
+  return bridgeFetch("/execute", { method: "POST", body: JSON.stringify(body) }, baseUrl);
 }
