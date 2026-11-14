@@ -7,6 +7,18 @@ Prod: expose with Cloudflare Tunnel:  cloudflared tunnel --url http://localhost:
       then set BRIDGE_URL=https://<tunnel-host> on Vercel.
 """
 import os, json, time
+from pathlib import Path
+
+# Load daemon/.env (simple KEY=VALUE) so you don't have to export vars every time.
+_env = Path(__file__).with_name(".env")
+if _env.exists():
+    for _line in _env.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _k, _v = _line.split("=", 1)
+        os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn

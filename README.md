@@ -12,6 +12,8 @@ Dual-environment AI sysadmin: **Vercel Brain** (cloud diagnostics + AI chat) × 
 
 **Live app:** https://whitty-hybrid.vercel.app — see **[ACTIVATE.md](ACTIVATE.md)** for full PC activation steps.
 
+**One-command PC setup:** `bash whitty.sh` (macOS/Linux) · `.\whitty.ps1` (Windows). Put `BRIDGE_TOKEN=...` in `daemon/.env` to skip prompts.
+
 ## Quick start
 ### 1. Brain (Vercel / local)
 ```bash
@@ -25,13 +27,21 @@ The cloud app takes the daemon URL at runtime via the **🔗 Connect my PC** car
 
 ### 2. Hands (your PC)
 ```bash
+git clone -b arena/918f92fd-whitty-hybrid https://github.com/kennedy-blip/whitty-hybrid.git
+cd whitty-hybrid
+bash whitty.sh          # Windows: .\whitty.ps1
+```
+That creates the venv, installs deps, starts the daemon on `:8765` and opens a Cloudflare tunnel.
+
+Manual equivalent:
+```bash
 cd daemon
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export BRIDGE_TOKEN=same-as-vercel
+cp .env.example .env    # then set BRIDGE_TOKEN=...
 python main.py
 ```
-Production: `cloudflared tunnel --url http://localhost:8765` → set the URL as `BRIDGE_URL` on Vercel.
+Then paste the tunnel URL into the app's **🔗 Connect my PC** card (or set `BRIDGE_URL` on Vercel).
 
 ## Features
 - **Cloud Sentinel:** DNS trace, SSL audit, CORS/header analysis, API latency triage.

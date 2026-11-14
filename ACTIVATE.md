@@ -1,80 +1,99 @@
 # ⚡ Activate Whitty Hybrid on your PC
 
 **Live app:** https://whitty-hybrid.vercel.app
-**Your bridge token:** `b6b8d9818bd3791d4903a7b9e3a723ec` *(already set on Vercel — you paste the same value into the daemon)*
-**WireGuard:** the daemon auto-installs it when you click Connect VPN.
+**Your bridge token:** `b6b8d9818bd3791d4903a7b9e3a723ec`
+*(already stored on Vercel — you paste the same value into the daemon)*
+
+> ⚠️ **Clone the right branch.** `git clone` alone gives you `main`, which is still the empty starter.
+> Use `-b arena/918f92fd-whitty-hybrid`, or run `git checkout` on the existing clone (Step 0b).
 
 ---
 
-## Step 1 — Get the code onto your PC
+## Step 0 — Get the code
+
+**Fresh clone (correct way):**
 ```bash
-git clone https://github.com/kennedy-blip/whitty-hybrid.git
+git clone -b arena/918f92fd-whitty-hybrid https://github.com/kennedy-blip/whitty-hybrid.git
 cd whitty-hybrid
 ```
-(or just download the `daemon/` folder — that's all the local side needs)
 
-## Step 2 — Start the daemon
+**Already cloned and seeing `The argument 'scripts\activate.ps1' ... does not exist`?** You're on `main`. Fix it in place — no re-clone:
+```powershell
+git fetch origin arena/918f92fd-whitty-hybrid
+git checkout arena/918f92fd-whitty-hybrid
+```
+Then continue with Step 1.
+
+---
+
+## Step 1 — One command
 
 ### Windows (PowerShell)
 ```powershell
 $env:BRIDGE_TOKEN="b6b8d9818bd3791d4903a7b9e3a723ec"
-powershell -ExecutionPolicy Bypass -File scripts\activate.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\activate.ps1
+```
+or, shorter, from the repo root:
+```powershell
+.\whitty.ps1
 ```
 
 ### macOS / Linux
 ```bash
-BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec bash scripts/activate.sh
+BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec bash whitty.sh
 ```
 
-The script creates a virtualenv, installs dependencies, starts the daemon on `:8765`, and (if `cloudflared` is installed) opens a public tunnel and prints the URL.
+The script: finds Python → creates `.venv` → installs `fastapi/uvicorn/psutil/websockets` → starts the daemon on `:8765` → verifies `/health` → opens a Cloudflare tunnel → **prints the URL to paste into the app**.
 
-### Manual, if you prefer
+### Zero-prompt option
+Put the token in `daemon/.env` (gitignored) instead of the environment:
 ```bash
-cd daemon
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-export BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec
-python main.py
+cp daemon/.env.example daemon/.env     # then edit BRIDGE_TOKEN=...
 ```
+The daemon loads that file automatically, so a plain `python daemon/main.py` is enough.
 
-## Step 3 — Expose it to the cloud (pick one)
+---
 
-**A. Cloudflare Tunnel — recommended, works from anywhere, free**
-```bash
-# macOS: brew install cloudflared   |  Windows: winget install Cloudflare.cloudflared
-cloudflared tunnel --url http://localhost:8765
-```
-Copy the `https://<random>.trycloudflare.com` URL it prints. The URL changes every restart — that's fine, you just re-paste it.
-
-**B. Same Wi-Fi only** — skip the tunnel and use `http://<your-pc-lan-ip>:8765` (e.g. `http://192.168.1.20:8765`). Find it with `ipconfig` (Windows) or `ifconfig` (macOS/Linux).
-
-## Step 4 — Connect the web app
+## Step 2 — Connect the web app
 1. Open https://whitty-hybrid.vercel.app
-2. In the **🔗 Connect my PC** card, paste your tunnel URL → **Save & Test**
-3. The header badge turns **● Daemon Online** — you're live.
+2. Card **🔗 Connect my PC** → paste the `https://….trycloudflare.com` URL → **Save & Test**
+3. Badge turns **● Daemon Online** ✅
 
-## Step 5 — Use it
-- **Cloud Sentinel** — DNS / SSL / CORS / API health, runs on Vercel, no PC needed.
-- **Tools tab → Local Bridge** — Wi-Fi scan, adapter power, ports, system overview.
-- **🔐 One-Click VPN** — click **⚡ Connect VPN on My PC**; approve when the card appears. First run auto-installs WireGuard, then the tunnel comes up and your public IP changes. Generate a `.conf` / QR for your phone too.
-- **Audit Trail** — every command, output and approval, stored in `daemon/audit.db`.
+No tunnel? Use `http://<your-PC-LAN-IP>:8765` — same Wi-Fi only.
+
+---
+
+## Step 3 — Use it
+| Feature | What to click |
+|---|---|
+| DNS / SSL / CORS / API health | **Tools → Cloud Sentinel** (runs on Vercel) |
+| Wi-Fi scan, adapter power, ports, system | **Tools → Local Bridge** |
+| One-click VPN | **🔐 Connect VPN on My PC** → **Approve** the card |
+| Everything that ran | **Audit Trail** (SQLite at `daemon/audit.db`) |
+
+VPN needs an elevated shell (Administrator on Windows, `sudo` on macOS/Linux) because it creates a network tunnel.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Fix |
+| Symptom | Cause / fix |
 |---|---|
-| `○ Daemon Offline` | Daemon not running, or tunnel URL changed — re-run the tunnel and re-paste the URL |
-| `401 Invalid bridge token` | The daemon's `BRIDGE_TOKEN` doesn't match Vercel's. Set the exact value above and restart |
-| Cloud tools fail | Those run on Vercel; check the domain/URL is public |
-| VPN: "WireGuard not installed" | Let Connect auto-install it, or install manually from wireguard.com and retry |
-| VPN connect hangs | Windows/macOS need admin/root for tunnel creation — run the terminal as Administrator / `sudo` |
-| `cloudflared` not found | Install it, or use LAN mode (`http://<lan-ip>:8765`) |
+| `The argument 'scripts\activate.ps1' ... does not exist` | You cloned `main`. Do a `git checkout arena/918f92fd-whitty-hybrid` (Step 0) |
+| `python` not recognised | Install Python 3 from python.org and tick **Add python.exe to PATH**, then reopen PowerShell |
+| `running scripts is disabled on this system` | You dropped `-ExecutionPolicy Bypass`, or run `Unblock-File .\scripts\activate.ps1` |
+| `○ Daemon Offline` in the app | Daemon stopped, or the quick-tunnel URL changed — re-run and re-paste |
+| `401 Invalid bridge token` | Daemon token ≠ Vercel token. Use exactly `b6b8d9818bd3791d4903a7b9e3a723ec` and restart |
+| Tunnel URL printed but Save & Test fails | Only `trycloudflare.com`, `ngrok`, `*.ts.net` and localhost are allowed — re-copy the full `https://` URL |
+| `pip install` fails behind a firewall | `set HTTPS_PROXY=http://host:port` then rerun |
+| VPN: "WireGuard not installed" | The daemon auto-installs it; if that fails install from wireguard.com and retry |
+| VPN connect hangs / no public IP | Restart the shell as Administrator / `sudo` |
 
-## Optional — your own VPN exit node
-To route traffic through your own VPS instead of the local hub:
+---
+
+## Optional — your own VPN exit node (VPS)
 ```bash
-scp scripts/deploy-vps.sh root@YOUR_VPS:/root/ && ssh root@YOUR_VPS "bash /root/deploy-vps.sh"
+scp scripts/deploy-vps.sh root@YOUR_VPS:/root/
+ssh root@YOUR_VPS "bash /root/deploy-vps.sh"
 ```
-Then in the VPN panel, enter `YOUR_VPS_IP:51820` as the endpoint and **Generate** → **Apply to My PC**.
+Then in the VPN panel enter `YOUR_VPS_IP:51820` → **Generate** → **Apply to My PC**.
