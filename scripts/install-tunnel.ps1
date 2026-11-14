@@ -72,17 +72,37 @@ Write-Host "  mode: $Mode" -ForegroundColor DarkGray
 
 # ============================================================ TAILSCALE
 if ($Mode -eq "tailscale") {
-  if (-not (Have "tailscale")) {
+  Add-ToolPaths
+  $tsExe = Resolve-Tool "tailscale" $tailscalePaths
+
+  if (-not $tsExe) {
     Write-Host "  Tailscale not found." -ForegroundColor Yellow
     if (Have "winget") {
       Write-Host "  Installing: winget install --id Tailscale.Tailscale -e" -ForegroundColor Yellow
       winget install --id Tailscale.Tailscale -e --accept-source-agreements --accept-package-agreements
-      Write-Host "  If it installed, CLOSE and REOPEN this terminal, then rerun this script." -ForegroundColor Yellow
+      Add-ToolPaths
+      $tsExe = Resolve-Tool "tailscale" $tailscalePaths
+      if ($tsExe) {
+        Write-Host "  installed -> $tsExe (continuing, no need to reopen the terminal)" -ForegroundColor Green
+        Start-Sleep -Seconds 3
+      }
     } else {
       Write-Host "  Install from https://tailscale.com/download/windows then rerun." -ForegroundColor Yellow
     }
+    if (-not $tsExe) {
+      Write-Host "  Still not found. Close and reopen PowerShell, then rerun this script." -ForegroundColor Yellow
+      exit 1
+    }
+  }
+
+  # Bullet-proof: never invoke an empty command path (that is what produced
+  # "The expression after '&' ... was not valid").
+  if (-not (Test-Path -LiteralPath $tsExe)) {
+    Write-Host "  ! tailscale.exe path is not usable: [$tsExe]" -ForegroundColor Red
+    Write-Host "    Run 'Get-Command tailscale' to see what PowerShell finds, then rerun." -ForegroundColor Yellow
     exit 1
   }
+  Write-Host "  using: $tsExe" -ForegroundColor DarkGray
 
   Write-Host "  bringing tailscale up (a browser window may open for login) ..." -ForegroundColor Yellow
   $upOk = $false
@@ -143,6 +163,13 @@ if (-not $cfExe) {
     exit 1
   }
 }
+
+if (-not (Test-Path -LiteralPath $cfExe)) {
+  Write-Host "  ! cloudflared path is not usable: [$cfExe]" -ForegroundColor Red
+  Write-Host "    Run 'Get-Command cloudflared' to see what PowerShell finds, then rerun." -ForegroundColor Yellow
+  exit 1
+}
+Write-Host "  using: $cfExe" -ForegroundColor DarkGray
 
 $cfDir = Join-Path $env:USERPROFILE ".cloudflared"
 $cert = Join-Path $cfDir "cert.pem"
