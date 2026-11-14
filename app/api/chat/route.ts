@@ -46,7 +46,8 @@ Tool-chaining: chain multiple tools in one turn to reach a real diagnosis (maxSt
 
 Safety: read-only tools run automatically. Mutating tools — disable_adapter_sleep, kill_process, network_recovery, vpn_connect, vpn_disconnect, wifi_saved_passwords — are blocked by the daemon until the human approves. When one of those returns {requiresApproval: true}, tell the user you need their approval and that an Approve button has appeared; do NOT claim the action ran.
 
-Wi-Fi passwords: use wifi_saved_passwords only when the user explicitly asks to see saved networks' passwords. It requires approval.`,
+Wi-Fi passwords: use wifi_saved_passwords only when the user explicitly asks to see saved networks' passwords. It requires approval.
+Sign-in networks: if the user says "the network asks me to sign in" or "it needs a login", call captive_portal_status (read-only) and tell them the portal URL. For corporate/802.1X networks use wifi_profile_details to show the EAP method and stored identity — explain that the password lives in the identity provider, not in Windows, so it cannot be extracted.`,
     messages,
     maxSteps: 6,
     tools: {
@@ -56,6 +57,16 @@ Wi-Fi passwords: use wifi_saved_passwords only when the user explicitly asks to 
       check_api_health: tool({ description: "Latency triage for an API URL (3 samples)", parameters: z.object({ url: z.string() }), execute: async ({ url }) => checkApiHealth(url) }),
 
       scan_wifi: tool({ description: "Scan nearby Wi-Fi: SSIDs, BSSIDs, RSSI, channels, congestion, channel advice", parameters: z.object({}), execute: async () => localTool("scan_wifi", {}, bridgeBase) }),
+      wifi_profile_details: tool({
+        description: "MUTATING (needs approval) — deep profile for one or all saved Wi-Fi networks: PSK, 802.1X/EAP method, stored identity, whether the network needs a sign-in page",
+        parameters: z.object({ ssid: z.string().optional() }),
+        execute: async ({ ssid }) => localTool("wifi_profile_details", ssid ? { ssid } : {}, bridgeBase),
+      }),
+      captive_portal_status: tool({
+        description: "Check whether the current Wi-Fi is stuck behind a captive-portal sign-in page and return the portal URL",
+        parameters: z.object({}),
+        execute: async () => localTool("captive_portal_status", {}, bridgeBase),
+      }),
       wifi_saved_passwords: tool({ description: "MUTATING (needs approval) — list saved Wi-Fi profiles with their stored passwords from this PC", parameters: z.object({}), execute: async () => localTool("wifi_saved_passwords", {}, bridgeBase) }),
       adapter_power_status: tool({ description: "Check whether the wireless adapter uses aggressive power saving", parameters: z.object({}), execute: async () => localTool("adapter_power_status", {}, bridgeBase) }),
       list_ports: tool({ description: "Map TCP/UDP ports to PIDs and process paths", parameters: z.object({}), execute: async () => localTool("list_ports", {}, bridgeBase) }),

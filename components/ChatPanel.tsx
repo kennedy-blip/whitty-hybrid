@@ -18,6 +18,7 @@ const MUTATING_LABEL: Record<string, string> = {
   vpn_connect: "Bring the WireGuard VPN up on this PC",
   vpn_disconnect: "Bring the WireGuard VPN down",
   wifi_saved_passwords: "Reveal saved Wi-Fi passwords",
+  wifi_profile_details: "Read saved network profiles (keys, 802.1X identity)",
 };
 
 function ToolInvocation({ invocation }: { invocation: any }) {

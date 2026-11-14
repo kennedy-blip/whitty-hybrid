@@ -214,3 +214,242 @@ def _saved_linux():
                         "note": None if psk else "enterprise/open network or no stored PSK"})
     return {"platform": "Linux", "count": len(entries), "networks": entries,
             "warning": "These are real saved credentials."}
+
+
+# ---------------------------------------------------------------------------
+# Saved profile deep-dive: enterprise / 802.1X / captive-portal networks.
+# These are the ones where a plain PSK is not the whole story: they either
+# need an identity+password, a certificate, or a browser sign-in page.
+# ---------------------------------------------------------------------------
+EAP_TYPES = {
+    "13": "EAP-TLS (certificate)", "18": "EAP-SIM", "21": "EAP-TTLS", "23": "EAP-AKA",
+    "25": "PEAP (username + password)", "43": "EAP-FAST", "50": "EAP-AKA'",
+}
+WLAN_PROFILE_DIRS = [
+    r"C:\ProgramData\Microsoft\Wlansvc\Profiles\Interfaces",
+]
+
+
+def _parse_profile_xml(path):
+    """Best-effort extraction from a Wlansvc profile XML (no dependencies)."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(path).getroot()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    def text(node, tag):
+        el = node.find(tag)
+        return (el.text or "").strip() if el is not None and el.text else None
+
+    ns = {"w": "http://www.microsoft.com/networking/WLAN/profile/v1",
+          "w3": "http://www.microsoft.com/networking/WLAN/profile/v3",
+          "e": "http://www.microsoft.com/networking/OneX/v1"}
+
+    def find_any(tags):
+        for t in tags:
+            el = root.find(t, ns)
+            if el is not None:
+                return el
+        return None
+
+    ssid_el = root.find("w:SSIDConfig/w:SSID/w:name", ns)
+    auth_el = root.find("w:MSM/w:security/w:authEncryption/w:authentication", ns)
+    enc_el = root.find("w:MSM/w:security/w:authEncryption/w:encryption", ns)
+    onex = root.find("w:MSM/w:security/w:OneX", ns)
+    eap = root.find(".//w:EAPConfig", ns)
+
+    eap_type = eap_method = None
+    if eap is not None:
+        eap_type = text(eap, "w:EAPMethod/w:Type") or eap.findtext(".//{*}Type")
+        m = {}
+        for el in eap.iter():
+            tag = el.tag.split("}")[-1]
+            if tag in ("Type", "VendorId", "AuthorId") and el.text:
+                m.setdefault(tag, el.text.strip())
+        eap_type = eap_type or m.get("Type")
+        eap_method = EAP_TYPES.get(str(eap_type), f"EAP type {eap_type}" if eap_type else None)
+
+    eap_user = None
+    for el in root.iter():
+        tag = el.tag.split("}")[-1].lower()
+        if tag in ("username", "user", "identity", "alternateidentity") and el.text and el.text.strip():
+            eap_user = el.text.strip()
+            break
+
+    key_material = None
+    for el in root.iter():
+        if el.tag.split("}")[-1] == "keyMaterial" and el.text:
+            key_material = el.text.strip()
+            break
+
+    auth = text(auth_el, ".") if auth_el is not None else None
+    enc = enc_el.text.strip() if enc_el is not None and enc_el.text else None
+    auth = (auth_el.text or "").strip() if auth_el is not None and auth_el.text else auth
+
+    security_mode = (
+        "open" if (auth or "").lower() == "open"
+        else "enterprise/802.1X" if onex is not None or (auth or "").upper() in ("WPA2-ENTERPRISE", "WPA3-ENTERPRISE")
+        else "personal/PSK"
+    )
+
+    return {
+        "ssid": (ssid_el.text or "").strip() if ssid_el is not None and ssid_el.text else None,
+        "authentication": auth,
+        "encryption": enc,
+        "securityMode": security_mode,
+        "requiresSignIn": security_mode != "personal/PSK",
+        "oneXEnabled": onex is not None,
+        "eapType": eap_type,
+        "eapMethod": eap_method,
+        "identity": eap_user,
+        "keyMaterial": key_material,
+        "profileFile": path,
+    }
+
+
+def wifi_profile_details(ssid=None):
+    """Sensitive (mutating): deep profile for one or all saved networks.
+
+    Reports what kind of sign-in a network needs and everything the OS will
+    hand over: PSK, 802.1X/EAP method, stored identity, and whether the next
+    connection will open a captive portal instead of just using a key.
+    """
+    os_name = platform.system()
+    if os_name == "Windows":
+        return _profile_details_windows(ssid)
+    if os_name == "Darwin":
+        base = _saved_macos()
+        if ssid:
+            base["networks"] = [n for n in base["networks"] if n["ssid"].lower() == ssid.lower()]
+            base["count"] = len(base["networks"])
+        for n in base["networks"]:
+            n["securityMode"] = "personal/PSK (or open)" if n.get("password") else "unknown"
+            n["requiresSignIn"] = False
+        base["note"] = "macOS keeps 802.1X identities in the system keychain; check System Settings > Wi-Fi > Details > 802.1X."
+        return base
+    return _saved_linux()
+
+
+def _profile_details_windows(ssid=None):
+    import glob, os as _os
+    profiles = []
+    for base in WLAN_PROFILE_DIRS:
+        for path in glob.glob(_os.path.join(base, "*", "*.xml")):
+            info = _parse_profile_xml(path)
+            if info.get("error"):
+                info["ssid"] = _os.path.splitext(_os.path.basename(path))[0]
+            info["ssid"] = info.get("ssid") or _os.path.splitext(_os.path.basename(path))[0]
+            profiles.append(info)
+
+    if not profiles:
+        # No access to ProgramData (non-admin) — fall back to netsh summaries.
+        return {"platform": "Windows", "profiles": [], "fallback": _saved_windows(),
+                "note": "ProgramData profile XML not readable — run the daemon as Administrator for 802.1X/EAP detail."}
+
+    if ssid:
+        profiles = [p for p in profiles if (p.get("ssid") or "").lower() == ssid.lower()] or profiles
+
+    for p in profiles:
+        name = p.get("ssid")
+        out = _run(["netsh", "wlan", "show", "profile", f"name={name}", "key=clear"])
+        psk = None
+        for line in out.splitlines():
+            m = KEY_RE.search(line)
+            if m:
+                psk = m.group(1).strip()
+                break
+        p["password"] = psk or p.get("keyMaterial")
+        p["hasStoredKey"] = bool(p["password"])
+        if p.get("securityMode") == "enterprise/802.1X":
+            p["note"] = (
+                "802.1X network: the password lives in your identity provider, not in the profile. "
+                "Windows stores an encrypted EAP blob that only your logged-in user can decrypt."
+            )
+        elif p.get("securityMode") == "open":
+            p["note"] = "Open network — no key. If it redirects to a login page, use the Captive Portal check."
+        p.pop("keyMaterial", None)
+
+    return {
+        "platform": "Windows",
+        "count": len(profiles),
+        "profiles": profiles,
+        "summary": {
+            "personal": sum(1 for p in profiles if p.get("securityMode") == "personal/PSK"),
+            "enterprise": sum(1 for p in profiles if p.get("securityMode") == "enterprise/802.1X"),
+            "openOrPortal": sum(1 for p in profiles if p.get("securityMode") == "open"),
+        },
+        "warning": "Real credentials. Whitty does not transmit them anywhere; only the audit log records that this ran.",
+    }
+
+
+def captive_portal_status():
+    """Read-only: is the current connection stuck behind a sign-in page?"""
+    import urllib.request, urllib.error, socket
+
+    probes = [
+        ("http://connectivitycheck.gstatic.com/generate_204", 204),
+        ("http://captive.apple.com/hotspot-detect.html", 200),
+        ("http://www.msftconnecttest.com/connecttest.txt", 200),
+    ]
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    results = []
+    portal = None
+    for url, expect in probes:
+        entry = {"probe": url, "expected": expect}
+        try:
+            with opener.open(url, timeout=6) as resp:
+                body = resp.read(200).decode("utf-8", "ignore")
+                entry.update(status=resp.status, location=resp.headers.get("Location"), body=body[:120])
+                if resp.status == expect:
+                    entry["verdict"] = "clean"
+                else:
+                    entry["verdict"] = "portal"
+                    portal = portal or resp.headers.get("Location") or url
+        except urllib.error.HTTPError as exc:
+            entry.update(status=exc.code, location=exc.headers.get("Location", "") if exc.headers else None,
+                         verdict="portal")
+            portal = portal or (exc.headers.get("Location") if exc.headers else None) or url
+        except Exception as exc:
+            entry.update(status=None, verdict="unreachable", error=str(exc))
+        results.append(entry)
+
+    # Which SSID are we on right now?
+    current = None
+    if platform.system() == "Windows":
+        out = _run(["netsh", "wlan", "show", "interfaces"])
+        for line in out.splitlines():
+            if line.strip().lower().startswith("ssid") and "bssid" not in line.strip().lower():
+                current = line.split(":", 1)[1].strip()
+                break
+    elif platform.system() == "Darwin":
+        out = _run(["/usr/sbin/airport", "-I"])
+        for line in out.splitlines():
+            if " SSID:" in line:
+                current = line.split("SSID:", 1)[1].strip()
+    else:
+        out = (_run(["iwgetid", "-r"]) or "").strip()
+        current = out if out and not out.startswith("ERROR") else None
+
+    behind = portal is not None
+    reachable = any(r.get("verdict") in ("clean", "portal") for r in results)
+    return {
+        "connectedSsid": current,
+        "behindSignInPage": behind,
+        "portalUrl": portal,
+        "signInRequired": behind,
+        "probes": results,
+        "advice": (
+            f"This network ({current or 'current'}) wants you to sign in at {portal} — open that URL in a browser, "
+            "accept the terms, and normal internet access resumes."
+            if behind else
+            "Internet reachable — no captive sign-in needed on this network."
+            if reachable else
+            "No probe got an answer, so the state is unknown — you may be offline, on a filtered network, or behind a proxy."
+        ),
+    }

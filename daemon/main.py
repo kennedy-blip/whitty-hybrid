@@ -35,8 +35,8 @@ def _auth(authorization: str | None):
     if TOKEN and authorization != f"Bearer {TOKEN}":
         raise HTTPException(401, "Invalid bridge token")
 
-READ_ONLY = {"scan_wifi", "adapter_power_status", "list_ports", "system_overview", "vpn_status", "audit_recent"}
-MUTATING = {"disable_adapter_sleep", "wifi_saved_passwords", "kill_process", "network_recovery", "vpn_connect", "vpn_disconnect", "vpn_kill_switch", "vpn_init_mesh", "vpn_apply_config"}
+READ_ONLY = {"scan_wifi", "adapter_power_status", "list_ports", "system_overview", "vpn_status", "audit_recent", "captive_portal_status"}
+MUTATING = {"disable_adapter_sleep", "wifi_saved_passwords", "wifi_profile_details", "kill_process", "network_recovery", "vpn_connect", "vpn_disconnect", "vpn_kill_switch", "vpn_init_mesh", "vpn_apply_config"}
 
 @app.get("/status")
 def status(authorization: str | None = Header(None)):
@@ -61,6 +61,8 @@ async def execute(req: Request, authorization: str | None = Header(None)):
     try:
         if tool == "scan_wifi": result = wifi_scanner.scan_wifi()
         elif tool == "wifi_saved_passwords": result = wifi_scanner.saved_passwords()
+        elif tool == "wifi_profile_details": result = wifi_scanner.wifi_profile_details(args.get("ssid") or None)
+        elif tool == "captive_portal_status": result = wifi_scanner.captive_portal_status()
         elif tool == "adapter_power_status": result = wifi_scanner.adapter_power_status()
         elif tool == "disable_adapter_sleep": result = wifi_scanner.disable_adapter_sleep()
         elif tool == "list_ports": result = network_tools.list_ports()
