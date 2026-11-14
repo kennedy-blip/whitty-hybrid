@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { bfetch } from "@/lib/bridge-client";
 
-type ToolDef = { id: string; label: string; desc: string; endpoint: string; inputLabel: string; placeholder: string; mutating?: boolean };
+type ToolDef = { id: string; label: string; desc: string; endpoint: string; inputLabel: string; placeholder: string; mutating?: boolean; argKey?: string };
 
 const CLOUD: ToolDef[] = [
   { id: "dns", label: "DNS Trace", desc: "A / CNAME / MX / TXT across resolvers", endpoint: "/api/cloud/dns", inputLabel: "Domain", placeholder: "example.com" },
@@ -16,6 +16,8 @@ const LOCAL: ToolDef[] = [
   { id: "adapter_power_status", label: "Adapter Power", desc: "Aggressive sleep detection", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
   { id: "list_ports", label: "Ports & PIDs", desc: "TCP/UDP → PID → path", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
   { id: "system_overview", label: "System Overview", desc: "CPU, memory, interfaces, IPs", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
+  { id: "wifi_profile_details", label: "Sign-in / 802.1X Profile", desc: "EAP method, identity, PSK, portal needs", endpoint: "/api/bridge/execute", inputLabel: "SSID (blank = all)", placeholder: "OfficeWiFi", mutating: true, argKey: "ssid" },
+  { id: "captive_portal_status", label: "Captive Portal Check", desc: "Is a sign-in page blocking internet?", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "" },
   { id: "wifi_saved_passwords", label: "Saved Wi-Fi Passwords", desc: "Reveal stored keys from the OS key store", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "", mutating: true },
   { id: "network_recovery", label: "Network Recovery", desc: "Flush DNS / renew DHCP / Winsock", endpoint: "/api/bridge/execute", inputLabel: "Action", placeholder: "flush_dns", mutating: true },
   { id: "disable_adapter_sleep", label: "Disable Sleep", desc: "Fix random Wi-Fi drops", endpoint: "/api/bridge/execute", inputLabel: "", placeholder: "", mutating: true },
@@ -32,7 +34,16 @@ function ToolCard({ tool, cloud }: { tool: ToolDef; cloud: boolean }) {
     try {
       const body = cloud
         ? { domain: input, url: input }
-        : { tool: tool.id, args: tool.id === "network_recovery" ? { action: input || "flush_dns" } : {}, approved };
+        : {
+            tool: tool.id,
+            args:
+              tool.id === "network_recovery"
+                ? { action: input || "flush_dns" }
+                : tool.argKey && input
+                  ? { [tool.argKey]: input }
+                  : {},
+            approved,
+          };
       const res = await bfetch(tool.endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.requiresApproval) { setApproval(data); }

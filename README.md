@@ -43,6 +43,9 @@ python main.py
 ```
 Then paste the tunnel URL into the app's **🔗 Connect my PC** card (or set `BRIDGE_URL` on Vercel).
 
+### Keep it running
+`scripts/install-service.ps1` (Windows Scheduled Task) or `scripts/install-service.sh` (systemd user unit) runs the daemon in the background at logon — no terminal required. Quick-tunnel URLs still change per restart; use a named Cloudflare tunnel or Tailscale for a stable address.
+
 ### Python version note
 The daemon needs **Python 3.9+**; **3.12 or 3.13 is recommended**. Dependencies are ranged rather than pinned so pip always downloads a prebuilt wheel — brand-new interpreters (e.g. 3.14) may lack wheels and trigger a Rust source build. Override the interpreter with `WHITTY_PYTHON=/path/to/python3.12` (or `$env:WHITTY_PYTHON` on Windows).
 

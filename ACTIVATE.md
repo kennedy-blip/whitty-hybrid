@@ -68,7 +68,9 @@ No tunnel? Use `http://<your-PC-LAN-IP>:8765` — same Wi-Fi only.
 |---|---|
 | DNS / SSL / CORS / API health | **Tools → Cloud Sentinel** (runs on Vercel) |
 | Wi-Fi scan, adapter power, ports, system | **Tools → Local Bridge** |
-| Saved Wi-Fi passwords | **Tools → Saved Wi-Fi Passwords** → Approve (or ask the AI: *"show my saved Wi-Fi passwords"*) |
+| Saved Wi-Fi passwords | **Tools → Saved Wi-Fi Passwords** → Approve |
+| Sign-in / 802.1X / corporate networks | **Tools → Sign-in / 802.1X Profile** (EAP method, stored identity, PSK) |
+| "This Wi-Fi wants me to log in" | **Tools → Captive Portal Check** (returns the portal URL) |
 | One-click VPN | **🔐 Connect VPN on My PC** → **Approve** the card |
 | Everything that ran | **Audit Trail** (SQLite at `daemon/audit.db`) |
 
@@ -98,6 +100,25 @@ VPN needs an elevated shell (Administrator on Windows, `sudo` on macOS/Linux) be
 | VPN connect hangs / no public IP | Restart the shell as Administrator / `sudo` |
 
 ---
+
+## Keep the daemon running without a terminal
+
+Close the terminal and the daemon dies with it. Install it as a background service instead:
+
+**Windows** (Scheduled Task, no console window, starts at logon, runs elevated so WireGuard + `netsh key=clear` work):
+```powershell
+notepad .\daemon\.env      # one line:  BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec
+.\scripts\install-service.ps1 -StartNow
+```
+Manage: `Start-ScheduledTask -TaskName WhittyHybridDaemon` / `Stop-ScheduledTask …` / `Unregister-ScheduledTask …`
+
+**Linux** (systemd user service):
+```bash
+bash scripts/install-service.sh
+journalctl --user -u whitty-daemon -f
+```
+
+> The **tunnel** is still its own process with a URL that changes on every restart. For an always-on URL use a free *named* Cloudflare tunnel (`cloudflared tunnel create witty` + DNS route) or Tailscale (`tailscale funnel 8765`) — `*.trycloudflare.com` quick tunnels are temporary by design.
 
 ## Optional — your own VPN exit node (VPS)
 ```bash
