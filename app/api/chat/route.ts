@@ -1,21 +1,10 @@
-import { streamText, tool } from "ai";
-import { z } from "zod";
-import { checkDns, checkSsl, checkCors, checkApiHealth } from "@/lib/cloud-tools";
-import { bridgeExecute, bridgeUrlFromRequest } from "@/lib/bridge";
+import { streamText } from "ai";
+import { bridgeUrlFromRequest } from "@/lib/bridge";
+import { buildAgentTools } from "@/lib/agent-tools";
 import { resolveModel, modelFailure, providerInfo } from "@/lib/model";
-import { logAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-// Local tools run on the user's PC through the daemon. Read-only ones execute
-// immediately; mutating ones are stopped by the daemon's gate and the payload
-// (requiresApproval) is surfaced to the UI as an Approve / Reject card.
-async function localTool(name: string, args: Record<string, any>, base?: string) {
-  const res = await bridgeExecute(name, args, base);
-  await logAudit({ tool: name, args, result: res.data, approved: null, source: "ai" });
-  return res.data;
-}
 
 export async function POST(req: Request) {
   try {
@@ -78,42 +67,13 @@ You have CLOUD tools (DNS, SSL, CORS, API health) that run instantly on Vercel, 
 
 Tool-chaining: chain multiple tools in one turn to reach a real diagnosis (maxSteps 6). Always finish with a short summary and concrete next steps.
 
-Safety: read-only tools run automatically. Mutating tools — disable_adapter_sleep, kill_process, network_recovery, vpn_connect, vpn_disconnect, wifi_saved_passwords — are blocked by the daemon until the human approves. When one of those returns {requiresApproval: true}, tell the user you need their approval and that an Approve button has appeared; do NOT claim the action ran.
+Safety: read-only tools run automatically. Mutating tools — disable_adapter_sleep, kill_process, network_recovery, vpn_connect, vpn_disconnect, wifi_saved_passwords, wifi_profile_details — are blocked by the daemon until the human approves. When one of those returns {requiresApproval: true}, tell the user you need their approval and that an Approve button has appeared; do NOT claim the action ran.
 
 Wi-Fi passwords: use wifi_saved_passwords only when the user explicitly asks to see saved networks' passwords. It requires approval.
 Sign-in networks: if the user says "the network asks me to sign in" or "it needs a login", call captive_portal_status (read-only) and tell them the portal URL. For corporate/802.1X networks use wifi_profile_details to show the EAP method and stored identity — explain that the password lives in the identity provider, not in Windows, so it cannot be extracted.`,
     messages,
     maxSteps: 6,
-    tools: {
-      check_dns: tool({ description: "Query A/CNAME/MX/TXT records for a domain", parameters: z.object({ domain: z.string() }), execute: async ({ domain }) => checkDns(domain) }),
-      check_ssl: tool({ description: "Audit the TLS certificate for a domain", parameters: z.object({ domain: z.string() }), execute: async ({ domain }) => checkSsl(domain) }),
-      check_cors: tool({ description: "Analyze CORS + security headers for a URL", parameters: z.object({ url: z.string() }), execute: async ({ url }) => checkCors(url) }),
-      check_api_health: tool({ description: "Latency triage for an API URL (3 samples)", parameters: z.object({ url: z.string() }), execute: async ({ url }) => checkApiHealth(url) }),
-
-      scan_wifi: tool({ description: "Scan nearby Wi-Fi: SSIDs, BSSIDs, RSSI, channels, congestion, channel advice", parameters: z.object({}), execute: async () => localTool("scan_wifi", {}, bridgeBase) }),
-      wifi_profile_details: tool({
-        description: "MUTATING (needs approval) — deep profile for one or all saved Wi-Fi networks: PSK, 802.1X/EAP method, stored identity, whether the network needs a sign-in page",
-        parameters: z.object({ ssid: z.string().optional() }),
-        execute: async ({ ssid }) => localTool("wifi_profile_details", ssid ? { ssid } : {}, bridgeBase),
-      }),
-      captive_portal_status: tool({
-        description: "Check whether the current Wi-Fi is stuck behind a captive-portal sign-in page and return the portal URL",
-        parameters: z.object({}),
-        execute: async () => localTool("captive_portal_status", {}, bridgeBase),
-      }),
-      wifi_saved_passwords: tool({ description: "MUTATING (needs approval) — list saved Wi-Fi profiles with their stored passwords from this PC", parameters: z.object({}), execute: async () => localTool("wifi_saved_passwords", {}, bridgeBase) }),
-      adapter_power_status: tool({ description: "Check whether the wireless adapter uses aggressive power saving", parameters: z.object({}), execute: async () => localTool("adapter_power_status", {}, bridgeBase) }),
-      list_ports: tool({ description: "Map TCP/UDP ports to PIDs and process paths", parameters: z.object({}), execute: async () => localTool("list_ports", {}, bridgeBase) }),
-      system_overview: tool({ description: "CPU/memory/disk/interfaces/IPs of the local PC", parameters: z.object({}), execute: async () => localTool("system_overview", {}, bridgeBase) }),
-
-      disable_adapter_sleep: tool({ description: "MUTATING (needs approval) — disable aggressive adapter power saving", parameters: z.object({}), execute: async () => localTool("disable_adapter_sleep", {}, bridgeBase) }),
-      kill_process: tool({ description: "MUTATING (needs approval) — kill a process by PID", parameters: z.object({ pid: z.number() }), execute: async ({ pid }) => localTool("kill_process", { pid }, bridgeBase) }),
-      network_recovery: tool({ description: "MUTATING (needs approval) — flush DNS / renew DHCP / reset Winsock / reset TCP-IP", parameters: z.object({ action: z.enum(["flush_dns", "renew_dhcp", "reset_winsock", "reset_tcpip"]) }), execute: async ({ action }) => localTool("network_recovery", { action }, bridgeBase) }),
-
-      vpn_status: tool({ description: "Check WireGuard VPN status on the local PC", parameters: z.object({}), execute: async () => localTool("vpn_status", {}, bridgeBase) }),
-      vpn_connect: tool({ description: "MUTATING (needs approval) — bring the WireGuard VPN up on the local PC", parameters: z.object({}), execute: async () => localTool("vpn_connect", {}, bridgeBase) }),
-      vpn_disconnect: tool({ description: "MUTATING (needs approval) — bring the WireGuard VPN down", parameters: z.object({}), execute: async () => localTool("vpn_disconnect", {}, bridgeBase) }),
-    },
+    tools: buildAgentTools(bridgeBase),
   });
 
   return result.toDataStreamResponse({

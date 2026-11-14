@@ -71,6 +71,32 @@ export async function GET(req: Request) {
     report.ping = { skipped: "no Groq key configured" };
   }
 
+  // ?tools=1 dumps every tool schema exactly as it goes to Groq, and flags any
+  // schema Groq would reject ("required must list every property").
+  if (url.searchParams.get("tools") === "1") {
+    try {
+      const { buildAgentTools } = await import("@/lib/agent-tools");
+      const tools = buildAgentTools();
+      const schemas: Record<string, any> = {};
+      const nonCompliant: string[] = [];
+      for (const [name, t] of Object.entries(tools)) {
+        try {
+          const json: any = await (t as any).parameters.jsonSchema;
+          const props = Object.keys(json?.properties || {});
+          const req: string[] = json?.required || [];
+          const missing = props.filter((k) => !req.includes(k));
+          if (missing.length) nonCompliant.push(`${name}: required is missing ${missing.join(",")}`);
+          schemas[name] = json;
+        } catch (err: any) {
+          schemas[name] = { error: String(err?.message || err) };
+        }
+      }
+      report.tools = { count: Object.keys(schemas).length, nonCompliant, schemas };
+    } catch (err: any) {
+      report.tools = { error: String(err?.message || err) };
+    }
+  }
+
   // ?selftest=1 runs one real agent turn (model + tool call + answer) so the
   // chat can be proven end-to-end without a browser.
   if (url.searchParams.get("selftest") === "1" && resolved) {
