@@ -121,7 +121,27 @@ bash scripts/install-service.sh
 journalctl --user -u whitty-daemon -f
 ```
 
-> The **tunnel** is still its own process with a URL that changes on every restart. For an always-on URL use a free *named* Cloudflare tunnel (`cloudflared tunnel create witty` + DNS route) or Tailscale (`tailscale funnel 8765`) — `*.trycloudflare.com` quick tunnels are temporary by design.
+### Permanent URL (no terminal, no changing link)
+
+Quick tunnels (`*.trycloudflare.com`) die with the window and change every restart. Install a real one instead:
+
+```powershell
+# easiest - no domain needed, gives https://<pc>.<tailnet>.ts.net
+.\scripts\install-tunnel.ps1 -Mode tailscale
+
+# or, if you own a domain on Cloudflare
+.\scripts\install-tunnel.ps1 -Mode cloudflare -Hostname witty.mydomain.com
+```
+
+| Option | URL you get | Needs | Survives reboot |
+|---|---|---|---|
+| **Tailscale Funnel** | `https://<pc>.<tailnet>.ts.net` | Tailscale account (free) | ✅ runs as a Windows service |
+| **Cloudflare named tunnel** | `https://witty.yourdomain.com` | domain on Cloudflare (free) | ✅ scheduled task, restarts on failure |
+| quick tunnel | `https://random.trycloudflare.com` | nothing | ❌ dies with the window |
+
+Remove it later with `.\scripts\install-tunnel.ps1 -Uninstall`.
+
+> **Custom domain?** The app only talks to tunnel hosts it recognises (`*.trycloudflare.com`, `*.ngrok-free.app`, `*.ts.net`, localhost). For your own domain add it on Vercel → Settings → Environment Variables: `BRIDGE_ALLOWED_HOSTS=witty.mydomain.com` (comma-separated for several). Tailscale needs no extra config.
 
 ## Optional — your own VPN exit node (VPS)
 ```bash

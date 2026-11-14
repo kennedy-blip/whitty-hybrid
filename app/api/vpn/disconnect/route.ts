@@ -5,6 +5,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const res = await bridgeExecute("vpn_disconnect", {}, bridgeUrlFromRequest(req), true);
-  logAudit({ tool: "vpn_disconnect", args: {}, result: res.data, approved: true, source: "vpn" });
+  await logAudit({ tool: "vpn_disconnect", args: {}, result: res.data, approved: true, source: "vpn" });
   return NextResponse.json(res.data);
 }

@@ -10,9 +10,17 @@ export default function AuditPanel() {
     return () => window.removeEventListener("whitty:bridge-changed", load);
   }, []);
   const all = [...(data?.local || []), ...(data?.cloud || [])].slice(0, 30);
-  if (!all.length) return <div className="text-xs text-slate-500">No audit entries yet — run a tool to see the trail.</div>;
+  const backend = data?.backend;
+  const badge = backend ? (
+    <div className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">
+      cloud trail: <span className={backend === "supabase" ? "text-emerald-400" : "text-amber-400"}>{backend}</span>
+      {backend === "memory" && " (per-instance — set SUPABASE_URL to persist)"}
+    </div>
+  ) : null;
+  if (!all.length) return <div>{badge}<div className="text-xs text-slate-500">No audit entries yet — run a tool to see the trail.</div></div>;
   return (
     <div className="space-y-1.5">
+      {badge}
       {all.map((e: any, i: number) => (
         <div key={i} className="flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-2 text-[11px]">
           <span className="font-mono text-sky-300">{e.tool}</span>
