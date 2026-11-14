@@ -1,5 +1,15 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-psutil==6.0.0
-websockets==12.0
-pydantic==2.9.2
+# Whitty Hybrid daemon dependencies.
+#
+# Deliberately ranged, not pinned: pip must be free to pick the newest build
+# that ships a prebuilt wheel for YOUR Python version. Hard pins (e.g.
+# pydantic==2.9.2) have no cp314 wheel, which makes pip compile pydantic-core
+# from Rust and fail on Python 3.14 with
+#   "the configured Python interpreter version (3.14) is newer than PyO3's
+#    maximum supported version (3.13)"
+fastapi>=0.115.0,<1.0
+# plain uvicorn, NOT uvicorn[standard]: the [standard] extras pull httptools,
+# watchfiles and uvloop, which also need C/Rust toolchains on brand-new Pythons.
+uvicorn>=0.30.6,<1.0
+psutil>=7.0.0,<8.0
+websockets>=13.0,<18.0
+pydantic>=2.12.0,<3.0
