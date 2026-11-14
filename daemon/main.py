@@ -6,7 +6,7 @@ Run:  python main.py          (serves on 0.0.0.0:8765)
 Prod: expose with Cloudflare Tunnel:  cloudflared tunnel --url http://localhost:8765
       then set BRIDGE_URL=https://<tunnel-host> on Vercel.
 """
-import os, json, time
+import os, json, time, hmac
 from pathlib import Path
 
 # Load daemon/.env (simple KEY=VALUE) so you don't have to export vars every time.
@@ -29,10 +29,53 @@ from audit_log import log, recent
 app = FastAPI(title="Whitty Hybrid Daemon", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-TOKEN = os.environ.get("BRIDGE_TOKEN", "")
+def _load_env():
+    """Read daemon/.env so `python main.py` (and the Scheduled Task) pick up the
+    token without relying on the shell that started it. Existing env vars win."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except Exception as exc:  # never block startup on a malformed .env
+        print(f"[env] could not read .env: {exc}")
+
+
+_load_env()
+
+TOKEN = os.environ.get("BRIDGE_TOKEN", "").strip()
+HOST = os.environ.get("BRIDGE_HOST", "127.0.0.1").strip() or "127.0.0.1"
+
+if not TOKEN:
+    print("")
+    print("  ============================================================")
+    print("   REFUSING TO START: no BRIDGE_TOKEN")
+    print("  ============================================================")
+    print("  Without a token this daemon accepts ANY caller - and it can")
+    print("  reveal saved Wi-Fi passwords and kill processes. A tunnel")
+    print("  would expose that to the whole internet.")
+    print("")
+    print("  Create daemon/.env with one line:")
+    print("      BRIDGE_TOKEN=<same value as the Vercel env var>")
+    print("  or set it for this shell:")
+    print("      $env:BRIDGE_TOKEN=\"...\"")
+    print("")
+    raise SystemExit(2)
+
 
 def _auth(authorization: str | None):
-    if TOKEN and authorization != f"Bearer {TOKEN}":
+    # Fail closed: a missing/!valid token is always rejected.
+    provided = (authorization or "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(provided, TOKEN):
         raise HTTPException(401, "Invalid bridge token")
 
 READ_ONLY = {"scan_wifi", "adapter_power_status", "list_ports", "system_overview", "vpn_status", "audit_recent", "captive_portal_status"}
@@ -84,9 +127,10 @@ async def execute(req: Request, authorization: str | None = Header(None)):
         return {"ok": False, "tool": tool, "error": str(e)}
 
 @app.get("/health")
-def health(): return {"ok": True}
+def health(): return {"ok": True, "auth": "token", "bind": HOST}
 
 if __name__ == "__main__":
-    print("Whitty Hybrid Daemon starting on :8765 ...")
-    print("Set BRIDGE_TOKEN env to match Vercel. Expose via: cloudflared tunnel --url http://localhost:8765")
-    uvicorn.run(app, host="0.0.0.0", port=8765)
+    print(f"Whitty Hybrid Daemon starting on {HOST}:8765 ...")
+    print("token: loaded" + (" from .env" if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")) else " from environment"))
+    print("Expose with:  tailscale funnel --bg 8765   (or cloudflared tunnel --url http://localhost:8765)")
+    uvicorn.run(app, host=HOST, port=8765)
