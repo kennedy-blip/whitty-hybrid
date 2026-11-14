@@ -43,6 +43,9 @@ python main.py
 ```
 Then paste the tunnel URL into the app's **🔗 Connect my PC** card (or set `BRIDGE_URL` on Vercel).
 
+### Python version note
+The daemon needs **Python 3.9+**; **3.12 or 3.13 is recommended**. Dependencies are ranged rather than pinned so pip always downloads a prebuilt wheel — brand-new interpreters (e.g. 3.14) may lack wheels and trigger a Rust source build. Override the interpreter with `WHITTY_PYTHON=/path/to/python3.12` (or `$env:WHITTY_PYTHON` on Windows).
+
 ## Features
 - **Cloud Sentinel:** DNS trace, SSL audit, CORS/header analysis, API latency triage.
 - **Local Bridge:** full Wi-Fi decrypt (SSID/BSSID/RSSI/channel/congestion), adapter power-state + fix, port→PID mapping, DNS/DHCP/Winsock recovery.

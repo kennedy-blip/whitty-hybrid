@@ -43,7 +43,7 @@ or, shorter, from the repo root:
 BRIDGE_TOKEN=b6b8d9818bd3791d4903a7b9e3a723ec bash whitty.sh
 ```
 
-The script: finds Python → creates `.venv` → installs `fastapi/uvicorn/psutil/websockets` → starts the daemon on `:8765` → verifies `/health` → opens a Cloudflare tunnel → **prints the URL to paste into the app**.
+The script: finds Python (prefers 3.13/3.12 when available) → creates `.venv` (rebuilds it if a different Python made it) → installs `fastapi/uvicorn/psutil/websockets` → starts the daemon on `:8765` → verifies `/health` → opens a Cloudflare tunnel → **prints the URL to paste into the app**.
 
 ### Zero-prompt option
 Put the token in `daemon/.env` (gitignored) instead of the environment:
@@ -86,6 +86,9 @@ VPN needs an elevated shell (Administrator on Windows, `sudo` on macOS/Linux) be
 | `401 Invalid bridge token` | Daemon token ≠ Vercel token. Use exactly `b6b8d9818bd3791d4903a7b9e3a723ec` and restart |
 | Tunnel URL printed but Save & Test fails | Only `trycloudflare.com`, `ngrok`, `*.ts.net` and localhost are allowed — re-copy the full `https://` URL |
 | `pip install` fails behind a firewall | `set HTTPS_PROXY=http://host:port` then rerun |
+| `Building wheel for pydantic-core ... error: interpreter version (3.14) is newer than PyO3's maximum supported version (3.13)` | Fixed in the repo — `git pull` and rerun. Cause: old hard pins had no 3.14 wheel so pip compiled from Rust. If it still happens, use Python 3.12/3.13: `py -3.12 -m venv .venv` then `.\daemon\.venv\Scripts\python.exe -m pip install -r daemon\requirements.txt` |
+| Any "failed building wheel" / maturin / cargo error | Your Python is newer than the published wheels. Install 3.12 or 3.13 and/or set `$env:WHITTY_PYTHON="C:\Python312\python.exe"` |
+| `.venv` created by a different Python | The launcher now detects this and rebuilds it automatically |
 | VPN: "WireGuard not installed" | The daemon auto-installs it; if that fails install from wireguard.com and retry |
 | VPN connect hangs / no public IP | Restart the shell as Administrator / `sudo` |
 
