@@ -18,6 +18,22 @@ async function localTool(name: string, args: Record<string, any>, base?: string)
 }
 
 export async function POST(req: Request) {
+  try {
+    return await handle(req);
+  } catch (err: any) {
+    console.error("[chat] fatal", err);
+    const message = `The chat backend failed: ${err?.message || String(err)}`;
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(`0:${JSON.stringify(message)}\n`));
+        c.close();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  }
+}
+
+async function handle(req: Request) {
   const { messages } = await req.json();
   const bridgeBase = bridgeUrlFromRequest(req);
   const model = getModel();
@@ -82,5 +98,14 @@ Sign-in networks: if the user says "the network asks me to sign in" or "it needs
     },
   });
 
-  return result.toDataStreamResponse();
+  return result.toDataStreamResponse({
+    getErrorMessage: (error) => {
+      const e = error as any;
+      const parts = [e?.message || String(error)];
+      if (e?.cause?.message) parts.push(`cause: ${e.cause.message}`);
+      if (e?.responseBody) parts.push(`body: ${String(e.responseBody).slice(0, 300)}`);
+      console.error("[chat] stream error", parts.join(" | "));
+      return parts.join(" | ");
+    },
+  });
 }

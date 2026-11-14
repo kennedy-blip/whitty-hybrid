@@ -75,7 +75,11 @@ function ToolInvocation({ invocation }: { invocation: any }) {
 }
 
 export default function ChatPanel() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({ api: "/api/chat", fetch: bridgeFetch as any });
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error, reload, stop } = useChat({
+    api: "/api/chat",
+    fetch: bridgeFetch as any,
+    onError: (e) => console.error("[chat] failed", e),
+  });
   const prompts = [
     "Check DNS and SSL for example.com",
     "Scan my Wi-Fi and find the most congested channel",
@@ -100,11 +104,35 @@ export default function ChatPanel() {
         )}
         {messages.map((m) => (
           <div key={m.id} className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${m.role === "user" ? "ml-auto bg-sky-600" : "bg-slate-800"}`}>
-            <div className="whitespace-pre-wrap">{m.content}</div>
+            {m.content ? <div className="whitespace-pre-wrap">{m.content}</div> : null}
+            {!m.content && !(m.toolInvocations && m.toolInvocations.length) && m.role === "assistant" && (
+              <span className="text-slate-400">(empty response)</span>
+            )}
             {m.toolInvocations?.map((t: any) => <ToolInvocation key={t.toolInvocationId} invocation={t} />)}
           </div>
         ))}
       </div>
+      {error && (
+        <div className="mx-3 mb-1 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <div className="font-semibold">The agent could not answer</div>
+          <div className="mt-0.5 break-words text-red-100/80">{String((error as any)?.message || error)}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => reload()} className="rounded-lg bg-red-600 px-3 py-1 text-[11px] font-bold hover:bg-red-500">
+              Retry
+            </button>
+            <a href="/api/ai-status?ping=1" target="_blank" rel="noreferrer" className="rounded-lg border border-red-400/40 px-3 py-1 text-[11px] hover:bg-red-500/10">
+              Diagnose model &amp; key
+            </a>
+          </div>
+        </div>
+      )}
+      {isLoading && (
+        <div className="mx-3 mb-1 flex items-center gap-2 text-xs text-slate-400">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400" />
+          Whitty is thinking… (tool calls appear below as they run)
+          <button type="button" onClick={() => stop()} className="ml-auto rounded-lg border border-slate-700 px-2 py-0.5 text-[10px] hover:bg-slate-800">Stop</button>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex gap-2 border-t border-slate-800 p-3">
         <input value={input} onChange={handleInputChange} placeholder="Diagnose something…"
           className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm outline-none focus:border-sky-500" />
