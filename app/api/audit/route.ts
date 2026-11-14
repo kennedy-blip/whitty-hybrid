@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getAudit } from "@/lib/audit";
-import { bridgeFetch } from "@/lib/bridge";
+import { bridgeFetch, bridgeUrlFromRequest } from "@/lib/bridge";
 export const runtime = "nodejs";
-export async function GET() {
-  const local = await bridgeFetch("/audit").catch(() => ({ data: { entries: [] } }));
+export const dynamic = "force-dynamic";
+export async function GET(req: NextRequest) {
+  const local = await bridgeFetch("/audit", {}, bridgeUrlFromRequest(req)).catch(() => ({ data: { entries: [] } }));
   return NextResponse.json({ cloud: getAudit(50), local: (local as any).data?.entries || [] });
 }

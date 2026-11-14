@@ -1,8 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
+import { bjson } from "@/lib/bridge-client";
 export default function AuditPanel() {
   const [data, setData] = useState<any>(null);
-  useEffect(() => { fetch("/api/audit").then((r) => r.json()).then(setData).catch(() => {}); }, []);
+  useEffect(() => {
+    const load = () => bjson("/api/audit").then(setData).catch(() => {});
+    load();
+    window.addEventListener("whitty:bridge-changed", load);
+    return () => window.removeEventListener("whitty:bridge-changed", load);
+  }, []);
   const all = [...(data?.local || []), ...(data?.cloud || [])].slice(0, 30);
   if (!all.length) return <div className="text-xs text-slate-500">No audit entries yet — run a tool to see the trail.</div>;
   return (

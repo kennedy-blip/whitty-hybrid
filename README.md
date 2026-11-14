@@ -10,6 +10,8 @@ Dual-environment AI sysadmin: **Vercel Brain** (cloud diagnostics + AI chat) × 
    VPN panel + approval cards          SQLite audit trail
 ```
 
+**Live app:** https://whitty-hybrid.vercel.app — see **[ACTIVATE.md](ACTIVATE.md)** for full PC activation steps.
+
 ## Quick start
 ### 1. Brain (Vercel / local)
 ```bash
@@ -18,6 +20,8 @@ cp .env.example .env.local   # set OPENAI_API_KEY, BRIDGE_URL, BRIDGE_TOKEN
 npm run dev                  # http://localhost:3000
 ```
 Deploy: push to GitHub → import in Vercel → set env vars. Works in demo mode without an AI key (panels still work).
+
+The cloud app takes the daemon URL at runtime via the **🔗 Connect my PC** card (stored in your browser), so a fresh Cloudflare Tunnel URL needs no redeploy. Only Cloudflare Tunnel / ngrok / Tailscale / localhost hosts are accepted as bridge targets.
 
 ### 2. Hands (your PC)
 ```bash

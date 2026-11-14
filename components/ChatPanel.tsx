@@ -1,9 +1,18 @@
 "use client";
 import { useState } from "react";
 import { useChat } from "@ai-sdk/react";
+import { getBridgeUrl } from "@/lib/bridge-client";
+
+// Attach the current tunnel URL so the server can reach YOUR daemon.
+async function bridgeFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const url = getBridgeUrl();
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...((init?.headers as Record<string, string>) || {}) };
+  if (url) headers["x-bridge-url"] = url;
+  return fetch(input, { ...init, headers });
+}
 
 export default function ChatPanel() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({ api: "/api/chat" });
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({ api: "/api/chat", fetch: bridgeFetch as any });
   const [quick, setQuick] = useState("");
   const prompts = [
     "Check DNS and SSL for example.com",

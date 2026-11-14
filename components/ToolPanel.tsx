@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { bfetch } from "@/lib/bridge-client";
 
 type ToolDef = { id: string; label: string; desc: string; endpoint: string; inputLabel: string; placeholder: string; mutating?: boolean };
 
@@ -31,7 +32,7 @@ function ToolCard({ tool, cloud }: { tool: ToolDef; cloud: boolean }) {
       const body = cloud
         ? { domain: input, url: input }
         : { tool: tool.id, args: tool.id === "network_recovery" ? { action: input || "flush_dns" } : {}, approved };
-      const res = await fetch(tool.endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await bfetch(tool.endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.requiresApproval) { setApproval(data); }
       else { setResult(data); setApproval(null); }

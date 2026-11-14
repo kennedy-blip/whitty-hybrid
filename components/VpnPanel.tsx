@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { bfetch } from "@/lib/bridge-client";
 
 export default function VpnPanel() {
   const [status, setStatus] = useState<any>(null);
@@ -9,25 +10,25 @@ export default function VpnPanel() {
   const [msg, setMsg] = useState("");
 
   async function refresh() {
-    try { const r = await fetch("/api/vpn/status"); setStatus(await r.json()); } catch {}
+    try { const r = await bfetch("/api/vpn/status"); setStatus(await r.json()); } catch {}
   }
   useEffect(() => { refresh(); const i = setInterval(refresh, 8000); return () => clearInterval(i); }, []);
 
   async function generate() {
     setBusy(true);
-    const r = await fetch("/api/vpn/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint }) });
+    const r = await bfetch("/api/vpn/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint }) });
     setGenerated(await r.json()); setBusy(false);
   }
   async function connect(config?: string) {
     setBusy(true); setMsg("Connecting…");
-    const r = await fetch("/api/vpn/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config ? { config } : {}) });
+    const r = await bfetch("/api/vpn/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config ? { config } : {}) });
     const d = await r.json();
-    setMsg(d.ok ? "✅ VPN connected on your PC." : `❌ ${d.error || d.message || "Failed — is the daemon running?"}`);
+    setMsg(d.ok ? "✅ VPN connected on your PC." : `❌ ${d.hint || d.error || d.message || (d.requiresApproval ? "Approval required." : "Failed — is the daemon running?")}`);
     setBusy(false); refresh();
   }
   async function disconnect() {
     setBusy(true);
-    await fetch("/api/vpn/disconnect", { method: "POST" });
+    await bfetch("/api/vpn/disconnect", { method: "POST" });
     setMsg("VPN disconnected."); setBusy(false); refresh();
   }
   function download() {
